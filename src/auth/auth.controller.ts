@@ -1,0 +1,245 @@
+import {
+  Body,
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Post,
+  UnauthorizedException,
+  Get,
+  UseGuards,
+  Req,
+  Res,
+  Query,
+} from '@nestjs/common';
+import { AuthService } from './auth.service';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { GoogleAuthGuard } from './guards/google-auth.guard';
+import { FacebookAuthGuard } from './guards/facebook-auth.guard';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBody,
+} from '@nestjs/swagger';
+import { CreateUserDto } from 'src/users/dto/create-user.dto';
+import { LoginDto } from './dto/login.dto';
+
+@ApiTags('Auth')
+@Controller('auth')
+export class AuthController {
+  constructor(private readonly authService: AuthService) {}
+
+  // === Enregistrement ===
+  @Post('register')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Créer un nouveau compte utilisateur' })
+  @ApiResponse({ status: 201, description: 'Utilisateur créé avec succès' })
+  @ApiResponse({ status: 409, description: 'Un utilisateur avec cet email existe déjà' })
+  @ApiResponse({ status: 400, description: 'Erreur de validation ou lors de l\'enregistrement' })
+  async register(@Body() createUserDto: CreateUserDto) {
+    try {
+      const result = await this.authService.register(createUserDto);
+      return result;
+    } catch (error) {
+      console.error('❌ Erreur dans le contrôleur register:', error);
+      throw error;
+    }
+  }
+
+  // === Login ===
+  @Post('login')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Se connecter avec email et mot de passe' })
+  @ApiBody({ type: LoginDto })
+  @ApiResponse({ status: 200, description: 'Connexion réussie' })
+  @ApiResponse({ status: 401, description: 'Email ou mot de passe incorrect' })
+  async login(@Body() loginDto: LoginDto, @Req() req, @Res() res) {
+    try {
+      const user = await this.authService.validateUser(
+        loginDto.email,
+        loginDto.password,
+      );
+
+      if (!user) {
+        // Vérifier si l'utilisateur existe mais n'a pas vérifié son email
+        const userExists = await this.authService.findUserByEmail(loginDto.email);
+        if (userExists && !userExists.emailVerified) {
+          throw new UnauthorizedException('Veuillez vérifier votre adresse email avant de vous connecter. Vérifiez votre boîte de réception.');
+        }
+        throw new UnauthorizedException('Email ou mot de passe incorrect');
+      }
+
+      const token = (await this.authService.login(user))?.access_token;
+
+      if (!token) {
+        throw new UnauthorizedException('Erreur lors de la génération du token');
+      }
+
+      // Envoyer un email de notification de connexion
+      try {
+        const clientIp = req.ip || req.connection?.remoteAddress || 'Inconnue';
+        await this.authService.sendLoginNotificationEmail(user.email, {
+          date: new Date(),
+          ip: clientIp,
+        });
+      } catch (error) {
+        // Ne pas bloquer le login si l'email échoue
+        console.error('Erreur lors de l\'envoi de l\'email de notification:', error);
+      }
+
+      const isProd = process.env.NODE_ENV === 'production';
+      res.cookie('access_token', token, {
+        httpOnly: true,
+        secure: isProd,
+        sameSite: isProd ? 'none' : 'lax',
+        maxAge: 1000 * 60 * 60, // 1 heure
+        path: '/',
+      });
+
+      return res.json({ success: true, access_token: token });
+    } catch (error) {
+      // Si c'est déjà une UnauthorizedException, la relancer
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      // Sinon, logger l'erreur et renvoyer une erreur générique
+      console.error('Erreur lors du login:', error);
+      throw new UnauthorizedException('Erreur lors de la connexion');
+    }
+  }
+
+  // === Google OAuth ===
+  @Get('google')
+  @UseGuards(GoogleAuthGuard)
+  async googleAuth() {
+    // lance le flux OAuth Google
+  }
+
+  @Get('google/redirect')
+  @UseGuards(GoogleAuthGuard)
+  async googleAuthRedirect(@Req() req, @Res() res) {
+    if (!req.user) throw new UnauthorizedException('Google authentication failed');
+
+    const token = (await this.authService.login(req.user))?.access_token;
+    
+    // Envoyer un email de notification de connexion
+    try {
+      const clientIp = req.ip || req.connection?.remoteAddress || 'Inconnue';
+      await this.authService.sendLoginNotificationEmail(req.user.email, {
+        date: new Date(),
+        ip: clientIp,
+      });
+    } catch (error) {
+      // Ne pas bloquer le login si l'email échoue
+      console.error('Erreur lors de l\'envoi de l\'email de notification:', error);
+    }
+    
+    const frontend = process.env.FRONTEND_URL;
+    const isProd = process.env.NODE_ENV === 'production';
+
+    res.cookie('access_token', token, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge: 1000 * 60 * 60,
+      path: '/',
+    });
+
+    // ✅ Mode test (pas de FRONTEND_URL)
+    if (!frontend) {
+      return res.status(200).json({
+        message: '✅ Google authentication successful!',
+        user: req.user,
+        access_token: token,
+      });
+    }
+
+    // ✅ Mode production
+      return res.redirect(`${frontend.replace(/\/$/, '')}/auth/success`);
+  }
+
+  // === Facebook OAuth ===
+  @Get('facebook')
+  @UseGuards(FacebookAuthGuard)
+  async facebookAuth() {
+    // lance le flux OAuth Facebook
+  }
+
+  @Get('facebook/redirect')
+  @UseGuards(FacebookAuthGuard)
+  async facebookAuthRedirect(@Req() req, @Res() res) {
+    if (!req.user) throw new UnauthorizedException('Facebook authentication failed');
+
+    const token = (await this.authService.login(req.user))?.access_token;
+    
+    // Envoyer un email de notification de connexion
+    try {
+      const clientIp = req.ip || req.connection?.remoteAddress || 'Inconnue';
+      await this.authService.sendLoginNotificationEmail(req.user.email, {
+        date: new Date(),
+        ip: clientIp,
+      });
+    } catch (error) {
+      // Ne pas bloquer le login si l'email échoue
+      console.error('Erreur lors de l\'envoi de l\'email de notification:', error);
+    }
+    
+    const frontend = process.env.FRONTEND_URL;
+    const isProd = process.env.NODE_ENV === 'production';
+
+    res.cookie('access_token', token, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge: 1000 * 60 * 60,
+      path: '/',
+    });
+
+    // ✅ Mode test — retourne JSON
+    if (!frontend) {
+      return res.status(200).json({
+        message: '✅ Facebook authentication successful!',
+        user: req.user,
+        access_token: token,
+      });
+    }
+
+    // ✅ Mode production — redirige vers le frontend
+      return res.redirect(`${frontend.replace(/\/$/, '')}/auth/success`);
+    }
+
+  // === Vérification d'email ===
+  @Get('verify-email')
+  async verifyEmail(@Query('token') token: string, @Res() res) {
+    try {
+      const payload = this.authService.verifyEmailToken(token);
+      const user = await this.authService.markEmailAsVerified(payload.email);
+      if (!user) throw new UnauthorizedException('Utilisateur introuvable');
+      return res.json({ message: '✅ Adresse e-mail vérifiée avec succès.' });
+    } catch (error) {
+      return res.status(400).json({ message: '❌ Lien invalide ou expiré.' });
+    }
+  }
+
+  // === Renvoyer l'email de vérification ===
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Renvoyer l\'email de vérification' })
+  @ApiResponse({ status: 200, description: 'Email de vérification renvoyé' })
+  @ApiResponse({ status: 404, description: 'Utilisateur non trouvé' })
+  @ApiResponse({ status: 400, description: 'Email déjà vérifié ou utilisateur non OAuth' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        email: {
+          type: 'string',
+          example: 'user@example.com',
+        },
+      },
+    },
+  })
+  async resendVerificationEmail(@Body() body: { email: string }) {
+    return this.authService.resendVerificationEmail(body.email);
+  }
+}
