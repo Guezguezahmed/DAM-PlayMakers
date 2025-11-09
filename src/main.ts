@@ -52,9 +52,10 @@ async function bootstrap() {
   SwaggerModule.setup('api', app, document);
 
   const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001; // Use PORT from environment or fallback to 3001
+  const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost'; // Listen on 0.0.0.0 in production for Render
   try {
-    await app.listen(port);
-    console.log(`Application is running on: http://localhost:${port}`);
+    await app.listen(port, host);
+    console.log(`Application is running on: http://${host}:${port}`);
   } catch (err) {
     if ((err as any)?.code === 'EADDRINUSE') {
       console.error(`Port ${port} is already in use. Choose another PORT or stop the process that is using it.`);
