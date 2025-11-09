@@ -22,43 +22,62 @@ export class AuthService {
   }
 
   async validateUser(email: string, password: string): Promise<any> {
-    const user = await this.userModel.findOne({ email });
-    
-    // Si l'utilisateur n'existe pas
-    if (!user) {
+    try {
+      console.log(`[VALIDATE_USER] Recherche de l'utilisateur: ${email}`);
+      const user = await this.userModel.findOne({ email });
+      
+      // Si l'utilisateur n'existe pas
+      if (!user) {
+        console.log(`[VALIDATE_USER] Utilisateur non trouvé: ${email}`);
+        return null;
+      }
+      
+      // Si l'utilisateur n'a pas de mot de passe (créé via OAuth), il ne peut pas se connecter avec email/password
+      if (!user.password) {
+        console.log(`[VALIDATE_USER] Utilisateur sans mot de passe (OAuth): ${email}`);
+        return null;
+      }
+      
+      // Vérifier que l'email est vérifié (sécurité)
+      // Note: Les utilisateurs OAuth ont déjà emailVerified = true automatiquement
+      if (!user.emailVerified) {
+        console.log(`[VALIDATE_USER] Email non vérifié: ${email}`);
+        return null;
+      }
+      
+      // Vérifier le mot de passe
+      console.log(`[VALIDATE_USER] Vérification du mot de passe pour: ${email}`);
+      const isPasswordValid = await bcrypt.compare(password, user.password);
+      if (!isPasswordValid) {
+        console.log(`[VALIDATE_USER] Mot de passe invalide pour: ${email}`);
+        return null;
+      }
+      
+      console.log(`[VALIDATE_USER] Utilisateur validé avec succès: ${email}`);
+      const { password: _, ...result } = user.toObject();
+      return result;
+    } catch (error) {
+      console.error(`[VALIDATE_USER] Erreur lors de la validation pour ${email}:`, error);
       return null;
     }
-    
-    // Si l'utilisateur n'a pas de mot de passe (créé via OAuth), il ne peut pas se connecter avec email/password
-    if (!user.password) {
-      return null;
-    }
-    
-    // Vérifier que l'email est vérifié (sécurité)
-    // Note: Les utilisateurs OAuth ont déjà emailVerified = true automatiquement
-    if (!user.emailVerified) {
-      return null;
-    }
-    
-    // Vérifier le mot de passe
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      return null;
-    }
-    
-    const { password: _, ...result } = user.toObject();
-    return result;
   }
 
   async login(user: any) {
-    const payload = {
-      email: user.email,
-      sub: user._id,
-      role: user.role,
-    };
-    return {
-      access_token: this.jwtService.sign(payload),
-    };
+    try {
+      const payload = {
+        email: user.email,
+        sub: user._id,
+        role: user.role,
+      };
+      const token = this.jwtService.sign(payload);
+      console.log(`[LOGIN] Token JWT généré pour: ${user.email}`);
+      return {
+        access_token: token,
+      };
+    } catch (error) {
+      console.error(`[LOGIN] Erreur lors de la génération du token JWT pour ${user?.email || 'unknown'}:`, error);
+      throw error;
+    }
   }
 
   async register(createUserDto: any) {

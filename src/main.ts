@@ -17,10 +17,19 @@ async function bootstrap() {
 
   // Enable CORS for frontend so cookies (httpOnly) can be included in requests.
   const frontend = process.env.FRONTEND_URL;
-  app.enableCors({
-    origin: frontend || true,
+  const isProd = process.env.PORT || process.env.NODE_ENV === 'production';
+  
+  // CORS configuration
+  const corsOptions = {
+    origin: frontend || (isProd ? false : true), // In production, require FRONTEND_URL
     credentials: true,
-  });
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    exposedHeaders: ['Set-Cookie'],
+  };
+  
+  console.log(`[CORS] Configuration: origin=${corsOptions.origin}, credentials=${corsOptions.credentials}`);
+  app.enableCors(corsOptions);
 
   // Redirect root '/' to the API prefix so GET / doesn't return 404
   // (This runs before the global prefix is applied.)

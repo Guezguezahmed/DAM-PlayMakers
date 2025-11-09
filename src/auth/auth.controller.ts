@@ -23,6 +23,7 @@ import {
 } from '@nestjs/swagger';
 import { CreateUserDto } from 'src/users/dto/create-user.dto';
 import { LoginDto } from './dto/login.dto';
+import { isProduction, shouldUseSecureCookies } from '../utils/env.util';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -55,55 +56,75 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Email ou mot de passe incorrect' })
   async login(@Body() loginDto: LoginDto, @Req() req, @Res() res) {
     try {
+      console.log(`[LOGIN] Tentative de connexion pour: ${loginDto.email}`);
+      
       const user = await this.authService.validateUser(
         loginDto.email,
         loginDto.password,
       );
 
       if (!user) {
+        console.log(`[LOGIN] Échec de validation pour: ${loginDto.email}`);
         // Vérifier si l'utilisateur existe mais n'a pas vérifié son email
         const userExists = await this.authService.findUserByEmail(loginDto.email);
         if (userExists && !userExists.emailVerified) {
+          console.log(`[LOGIN] Email non vérifié pour: ${loginDto.email}`);
           throw new UnauthorizedException('Veuillez vérifier votre adresse email avant de vous connecter. Vérifiez votre boîte de réception.');
         }
+        console.log(`[LOGIN] Email ou mot de passe incorrect pour: ${loginDto.email}`);
         throw new UnauthorizedException('Email ou mot de passe incorrect');
       }
+
+      console.log(`[LOGIN] Utilisateur validé: ${user.email}`);
 
       const token = (await this.authService.login(user))?.access_token;
 
       if (!token) {
+        console.error(`[LOGIN] Erreur lors de la génération du token pour: ${loginDto.email}`);
         throw new UnauthorizedException('Erreur lors de la génération du token');
       }
 
+      console.log(`[LOGIN] Token généré avec succès pour: ${loginDto.email}`);
+
       // Envoyer un email de notification de connexion
       try {
-        const clientIp = req.ip || req.connection?.remoteAddress || 'Inconnue';
+        const clientIp = req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for'] || 'Inconnue';
         await this.authService.sendLoginNotificationEmail(user.email, {
           date: new Date(),
           ip: clientIp,
         });
+        console.log(`[LOGIN] Email de notification envoyé pour: ${loginDto.email}`);
       } catch (error) {
         // Ne pas bloquer le login si l'email échoue
-        console.error('Erreur lors de l\'envoi de l\'email de notification:', error);
+        console.error(`[LOGIN] Erreur lors de l'envoi de l'email de notification pour ${loginDto.email}:`, error.message || error);
       }
 
-      const isProd = process.env.NODE_ENV === 'production';
-      res.cookie('access_token', token, {
+      const isProd = shouldUseSecureCookies();
+      const cookieOptions: any = {
         httpOnly: true,
         secure: isProd,
         sameSite: isProd ? 'none' : 'lax',
         maxAge: 1000 * 60 * 60, // 1 heure
         path: '/',
-      });
+      };
+
+      // En production avec HTTPS, ajouter domain si nécessaire
+      if (isProd && process.env.COOKIE_DOMAIN) {
+        cookieOptions.domain = process.env.COOKIE_DOMAIN;
+      }
+
+      res.cookie('access_token', token, cookieOptions);
+      console.log(`[LOGIN] Cookie défini avec secure=${isProd}, sameSite=${cookieOptions.sameSite}`);
 
       return res.json({ success: true, access_token: token });
     } catch (error) {
       // Si c'est déjà une UnauthorizedException, la relancer
       if (error instanceof UnauthorizedException) {
+        console.log(`[LOGIN] UnauthorizedException: ${error.message}`);
         throw error;
       }
       // Sinon, logger l'erreur et renvoyer une erreur générique
-      console.error('Erreur lors du login:', error);
+      console.error(`[LOGIN] Erreur inattendue lors du login pour ${loginDto?.email || 'unknown'}:`, error);
       throw new UnauthorizedException('Erreur lors de la connexion');
     }
   }
@@ -135,15 +156,21 @@ export class AuthController {
     }
     
     const frontend = process.env.FRONTEND_URL;
-    const isProd = process.env.NODE_ENV === 'production';
+    const isProd = shouldUseSecureCookies();
 
-    res.cookie('access_token', token, {
+    const cookieOptions: any = {
       httpOnly: true,
       secure: isProd,
       sameSite: isProd ? 'none' : 'lax',
       maxAge: 1000 * 60 * 60,
       path: '/',
-    });
+    };
+
+    if (isProd && process.env.COOKIE_DOMAIN) {
+      cookieOptions.domain = process.env.COOKIE_DOMAIN;
+    }
+
+    res.cookie('access_token', token, cookieOptions);
 
     // ✅ Mode test (pas de FRONTEND_URL)
     if (!frontend) {
@@ -185,15 +212,21 @@ export class AuthController {
     }
     
     const frontend = process.env.FRONTEND_URL;
-    const isProd = process.env.NODE_ENV === 'production';
+    const isProd = shouldUseSecureCookies();
 
-    res.cookie('access_token', token, {
+    const cookieOptions: any = {
       httpOnly: true,
       secure: isProd,
       sameSite: isProd ? 'none' : 'lax',
       maxAge: 1000 * 60 * 60,
       path: '/',
-    });
+    };
+
+    if (isProd && process.env.COOKIE_DOMAIN) {
+      cookieOptions.domain = process.env.COOKIE_DOMAIN;
+    }
+
+    res.cookie('access_token', token, cookieOptions);
 
     // ✅ Mode test — retourne JSON
     if (!frontend) {
