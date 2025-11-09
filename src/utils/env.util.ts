@@ -14,7 +14,7 @@ export function isProduction(): boolean {
 
   // Check if PORT is set (Render always sets PORT)
   // In local development, we usually use a default port
-  if (process.env.PORT && process.env.PORT !== '3001' && process.env.PORT !== '3002') {
+  if (process.env.PORT && process.env.PORT !== '3002' && process.env.PORT !== '3000') {
     return true;
   }
 
