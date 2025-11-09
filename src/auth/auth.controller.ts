@@ -23,7 +23,7 @@ import {
 } from '@nestjs/swagger';
 import { CreateUserDto } from 'src/users/dto/create-user.dto';
 import { LoginDto } from './dto/login.dto';
-import { isProduction, shouldUseSecureCookies } from '../utils/env.util';
+import { shouldUseSecureCookies } from '../utils/env.util';
 
 @ApiTags('Auth')
 @Controller('auth')
