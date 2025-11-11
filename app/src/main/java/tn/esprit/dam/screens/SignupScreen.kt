@@ -1,5 +1,6 @@
 package tn.esprit.dam.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
@@ -19,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -30,11 +32,14 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import tn.esprit.dam.R
+import tn.esprit.dam.models.AuthUiState
+import tn.esprit.dam.models.AuthViewModel // Import the ViewModel
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -47,20 +52,58 @@ import java.util.regex.Pattern
 @Composable
 fun SignupScreen(
     navController: NavController,
+    // Inject the ViewModel
+    viewModel: AuthViewModel = viewModel(),
     isDarkTheme: Boolean = false,
     onToggleTheme: () -> Unit = {}
 ) {
-    SignupScreenContent(navController)
+    val uiState = viewModel.uiState
+    val context = LocalContext.current
+
+    // Handle Authentication Success or Failure (Side Effect)
+    LaunchedEffect(uiState.isAuthenticated, uiState.errorMessage) {
+        if (uiState.isAuthenticated) {
+            // Success: User is registered and logged in, navigate to Home
+            Toast.makeText(context, "Registration successful!", Toast.LENGTH_LONG).show()
+            navController.navigate("HomeScreen") {
+                popUpTo("SignupScreen") { inclusive = true }
+            }
+        } else if (uiState.errorMessage != null) {
+            val message = uiState.errorMessage
+            // Show error/success message
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            
+            // Check if registration was successful (even without token/authentication)
+            // This happens in email verification flows
+            if (message.contains("Account created successfully", ignoreCase = true) || 
+                message.contains("check your email", ignoreCase = true) ||
+                message.contains("created successfully", ignoreCase = true)) {
+                // Registration successful - navigate to login screen after a short delay
+                delay(2000) // Show toast for 2 seconds
+                navController.navigate("LoginScreen") {
+                    popUpTo("SignupScreen") { inclusive = true }
+                }
+            }
+            
+            viewModel.clearError()
+        }
+    }
+
+    SignupScreenContent(navController, viewModel, uiState)
 }
 
 // Roles for the dropdown
 private val roles = listOf("JOUEUR", "OWNER", "ARBITRE")
-private val DATE_FORMAT = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+// API expects "YYYY-MM-DD". We display "dd/MM/yyyy"
+private val DISPLAY_DATE_FORMAT = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+private val API_DATE_FORMAT = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SignupScreenContent(
-    navController: NavController
+    navController: NavController,
+    viewModel: AuthViewModel,
+    uiState: AuthUiState
 ) {
     // ACCESS COLORS VIA MATERIALTHEME
     val primaryColor = MaterialTheme.colorScheme.primary
@@ -71,32 +114,35 @@ fun SignupScreenContent(
     val secondaryTextColor = MaterialTheme.colorScheme.outline
     val errorColor = MaterialTheme.colorScheme.error
 
-    // State for new and existing input fields
-    var name by remember { mutableStateOf("") } // FullName split into Name and Surname
-    var surname by remember { mutableStateOf("") }
+    // State for new and existing input fields (matching DTO: prenom, nom, email, tel, age, password, role)
+    var firstName by remember { mutableStateOf("") } // prenom (used for Name in UI)
+    var lastName by remember { mutableStateOf("") } // nom (used for Surname in UI)
     var email by remember { mutableStateOf("") }
-    var phoneNumber by remember { mutableStateOf("") }
-    var birthDateText by remember { mutableStateOf("") } // Displayed birth date
-    var selectedRole by remember { mutableStateOf<String?>(null) } // Role
+    var phoneNumber by remember { mutableStateOf("") } // tel
+    var birthDateText by remember { mutableStateOf("") } // age (for display)
+    var selectedRole by remember { mutableStateOf<String?>(null) } // role
     var password by remember { mutableStateOf("") }
-    var confirmPassword by remember { mutableStateOf("") } // New field
+    var confirmPassword by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
-    var confirmPasswordVisible by remember { mutableStateOf(false) } // New field
+    var confirmPasswordVisible by remember { mutableStateOf(false) }
     var agreedToTerms by remember { mutableStateOf(false) }
 
     // State for new and existing validation errors
-    var nameError by remember { mutableStateOf<String?>(null) }
-    var surnameError by remember { mutableStateOf<String?>(null) }
+    var firstNameError by remember { mutableStateOf<String?>(null) }
+    var lastNameError by remember { mutableStateOf<String?>(null) }
     var emailError by remember { mutableStateOf<String?>(null) }
     var phoneError by remember { mutableStateOf<String?>(null) }
     var birthDateError by remember { mutableStateOf<String?>(null) }
     var roleError by remember { mutableStateOf<String?>(null) }
     var passwordError by remember { mutableStateOf<String?>(null) }
-    var confirmPasswordError by remember { mutableStateOf<String?>(null) } // New error state
+    var confirmPasswordError by remember { mutableStateOf<String?>(null) }
     var termsError by remember { mutableStateOf<String?>(null) }
 
     // State for Role Dropdown
     var expanded by remember { mutableStateOf(false) }
+
+    // State to track if registration was successful (for showing resend button)
+    var registrationSuccessful by remember { mutableStateOf(false) }
 
     // Snackbar Host State for displaying messages
     val snackbarHostState = remember { SnackbarHostState() }
@@ -104,7 +150,8 @@ fun SignupScreenContent(
     val scrollState = rememberScrollState()
 
     // Date Picker Dialog State
-    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = System.currentTimeMillis())
+    val initialDateMillis = Calendar.getInstance().apply { add(Calendar.YEAR, -18) }.timeInMillis
+    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialDateMillis)
     var showDatePicker by remember { mutableStateOf(false) }
 
     // Validation patterns
@@ -119,7 +166,7 @@ fun SignupScreenContent(
                 TextButton(
                     onClick = {
                         datePickerState.selectedDateMillis?.let { millis ->
-                            birthDateText = DATE_FORMAT.format(Date(millis))
+                            birthDateText = DISPLAY_DATE_FORMAT.format(Date(millis))
                             birthDateError = null // Clear error on successful selection
                         }
                         showDatePicker = false
@@ -142,25 +189,25 @@ fun SignupScreenContent(
         var isValid = true
 
         // Reset all errors first
-        nameError = null; surnameError = null; emailError = null; phoneError = null; birthDateError = null; roleError = null
+        firstNameError = null; lastNameError = null; emailError = null; phoneError = null; birthDateError = null; roleError = null
         passwordError = null; confirmPasswordError = null; termsError = null
 
-        // Name and Surname Checks
-        if (name.trim().length < 3) { nameError = "Name must be at least 3 characters."; isValid = false }
-        if (surname.trim().length < 3) { surnameError = "Surname must be at least 3 characters."; isValid = false }
+        // Name and Surname Checks (prenom and nom)
+        if (firstName.trim().length < 3) { firstNameError = "Name must be at least 3 characters."; isValid = false }
+        if (lastName.trim().length < 3) { lastNameError = "Surname must be at least 3 characters."; isValid = false }
 
         // Email Check
         if (!emailPattern.matcher(email).matches()) { emailError = "Invalid email format."; isValid = false }
 
-        // Phone Check
+        // Phone Check (tel)
         if (!phoneNumber.matches(Regex("^\\d{8}$"))) { phoneError = "Phone number must be exactly 8 digits."; isValid = false }
 
-        // Birth Date Check (Must be 18 years or older)
+        // Birth Date Check (age)
         if (birthDateText.isEmpty()) {
             birthDateError = "Birth date is required."; isValid = false
         } else {
             try {
-                val birthDate = DATE_FORMAT.parse(birthDateText)
+                val birthDate = DISPLAY_DATE_FORMAT.parse(birthDateText)
                 val eighteenYearsAgo = Calendar.getInstance().apply { add(Calendar.YEAR, -18) }.time
                 if (birthDate == null || birthDate.after(eighteenYearsAgo)) {
                     birthDateError = "You must be 18 or older to register."; isValid = false
@@ -192,13 +239,13 @@ fun SignupScreenContent(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(backgroundColor) // Dynamic background
+                    .background(backgroundColor)
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
-                        .background(cardSurfaceColor) // Dynamic surface/card background
+                        .background(cardSurfaceColor)
                         .padding(horizontal = 24.dp)
                         .padding(paddingValues)
                         .verticalScroll(scrollState),
@@ -222,51 +269,51 @@ fun SignupScreenContent(
                             text = "Get Started",
                             fontSize = 28.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = primaryTextColor // Dynamic primary text color
+                            color = primaryTextColor
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 modifier = Modifier
                                     .size(8.dp)
                                     .clip(CircleShape)
-                                    .background(primaryColor) // Dynamic primary color
+                                    .background(primaryColor)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "by creating a free account.",
                                 fontSize = 14.sp,
-                                color = secondaryTextColor // Dynamic secondary color
+                                color = secondaryTextColor
                             )
                         }
                     }
 
-                    // --- 2. Input Fields (Dynamic Colors) ---
+                    // --- 2. Input Fields ---
 
-                    // Name Input
+                    // Name Input (First Name)
                     TextField(
-                        value = name, onValueChange = { name = it; nameError = null },
+                        value = firstName, onValueChange = { firstName = it; firstNameError = null },
                         modifier = Modifier.fillMaxWidth(), placeholder = { Text("Name", color = secondaryTextColor.copy(alpha = 0.7f)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text), singleLine = true, isError = nameError != null,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text), singleLine = true, isError = firstNameError != null,
                         colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, disabledIndicatorColor = Color.Transparent, focusedContainerColor = inputBackgroundColor, unfocusedContainerColor = inputBackgroundColor, disabledContainerColor = inputBackgroundColor, cursorColor = primaryColor, focusedTextColor = primaryTextColor, unfocusedTextColor = primaryTextColor),
                         shape = RoundedCornerShape(12.dp),
-                        trailingIcon = { Icon(imageVector = Icons.Default.Person, contentDescription = "Person Icon", tint = if (nameError != null) errorColor else secondaryTextColor) }
+                        trailingIcon = { Icon(imageVector = Icons.Default.Person, contentDescription = "Person Icon", tint = if (firstNameError != null) errorColor else secondaryTextColor) }
                     )
-                    if (nameError != null) { Text(nameError!!, color = errorColor, fontSize = 12.sp, modifier = Modifier.fillMaxWidth()) }
+                    if (firstNameError != null) { Text(firstNameError!!, color = errorColor, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp)) }
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Surname Input
+                    // Surname Input (Last Name)
                     TextField(
-                        value = surname, onValueChange = { surname = it; surnameError = null },
+                        value = lastName, onValueChange = { lastName = it; lastNameError = null },
                         modifier = Modifier.fillMaxWidth(), placeholder = { Text("Surname", color = secondaryTextColor.copy(alpha = 0.7f)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text), singleLine = true, isError = surnameError != null,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text), singleLine = true, isError = lastNameError != null,
                         colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, disabledIndicatorColor = Color.Transparent, focusedContainerColor = inputBackgroundColor, unfocusedContainerColor = inputBackgroundColor, disabledContainerColor = inputBackgroundColor, cursorColor = primaryColor, focusedTextColor = primaryTextColor, unfocusedTextColor = primaryTextColor),
                         shape = RoundedCornerShape(12.dp),
-                        trailingIcon = { Icon(imageVector = Icons.Default.Person, contentDescription = "Person Icon", tint = if (surnameError != null) errorColor else secondaryTextColor) }
+                        trailingIcon = { Icon(imageVector = Icons.Default.Person, contentDescription = "Person Icon", tint = if (lastNameError != null) errorColor else secondaryTextColor) }
                     )
-                    if (surnameError != null) { Text(surnameError!!, color = errorColor, fontSize = 12.sp, modifier = Modifier.fillMaxWidth()) }
+                    if (lastNameError != null) { Text(lastNameError!!, color = errorColor, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp)) }
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Phone Number Input
+                    // Phone Number Input (tel)
                     TextField(
                         value = phoneNumber, onValueChange = { if (it.length <= 8 && it.all { char -> char.isDigit() }) { phoneNumber = it; phoneError = null } },
                         modifier = Modifier.fillMaxWidth(), placeholder = { Text("Phone number (8 digits)", color = secondaryTextColor.copy(alpha = 0.7f)) },
@@ -275,7 +322,7 @@ fun SignupScreenContent(
                         shape = RoundedCornerShape(12.dp),
                         trailingIcon = { Icon(imageVector = Icons.Default.Phone, contentDescription = "Phone Icon", tint = if (phoneError != null) errorColor else secondaryTextColor) }
                     )
-                    if (phoneError != null) { Text(phoneError!!, color = errorColor, fontSize = 12.sp, modifier = Modifier.fillMaxWidth()) }
+                    if (phoneError != null) { Text(phoneError!!, color = errorColor, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp)) }
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Valid Email Input
@@ -287,7 +334,7 @@ fun SignupScreenContent(
                         shape = RoundedCornerShape(12.dp),
                         trailingIcon = { Icon(imageVector = Icons.Default.Email, contentDescription = "Email Icon", tint = if (emailError != null) errorColor else secondaryTextColor) }
                     )
-                    if (emailError != null) { Text(emailError!!, color = errorColor, fontSize = 12.sp, modifier = Modifier.fillMaxWidth()) }
+                    if (emailError != null) { Text(emailError!!, color = errorColor, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp)) }
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Birth Date Input (Clickable for Date Picker)
@@ -309,16 +356,20 @@ fun SignupScreenContent(
                             disabledTextColor = primaryTextColor // Text color when disabled
                         ),
                         shape = RoundedCornerShape(12.dp),
-                        trailingIcon = { Icon(imageVector = Icons.Default.CalendarToday, contentDescription = "Calendar Icon", tint = if (birthDateError != null) errorColor else secondaryTextColor) }
+                        trailingIcon = {
+                            IconButton(onClick = { showDatePicker = true }, enabled = !uiState.isLoading) {
+                                Icon(imageVector = Icons.Default.CalendarToday, contentDescription = "Calendar Icon", tint = if (birthDateError != null) errorColor else secondaryTextColor)
+                            }
+                        }
                     )
-                    if (birthDateError != null) { Text(birthDateError!!, color = errorColor, fontSize = 12.sp, modifier = Modifier.fillMaxWidth()) }
+                    if (birthDateError != null) { Text(birthDateError!!, color = errorColor, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp)) }
                     Spacer(modifier = Modifier.height(16.dp))
 
 
                     // Role Dropdown Input
                     ExposedDropdownMenuBox(
                         expanded = expanded,
-                        onExpandedChange = { expanded = !expanded },
+                        onExpandedChange = { if (!uiState.isLoading) expanded = !expanded },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         TextField(
@@ -350,7 +401,7 @@ fun SignupScreenContent(
                             }
                         }
                     }
-                    if (roleError != null) { Text(roleError!!, color = errorColor, fontSize = 12.sp, modifier = Modifier.fillMaxWidth()) }
+                    if (roleError != null) { Text(roleError!!, color = errorColor, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp)) }
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Strong Password Input
@@ -367,7 +418,7 @@ fun SignupScreenContent(
                             }
                         }
                     )
-                    if (passwordError != null) { Text(passwordError!!, color = errorColor, fontSize = 12.sp, modifier = Modifier.fillMaxWidth()) }
+                    if (passwordError != null) { Text(passwordError!!, color = errorColor, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp)) }
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Confirm Password Input (New Field)
@@ -384,7 +435,7 @@ fun SignupScreenContent(
                             }
                         }
                     )
-                    if (confirmPasswordError != null) { Text(confirmPasswordError!!, color = errorColor, fontSize = 12.sp, modifier = Modifier.fillMaxWidth()) }
+                    if (confirmPasswordError != null) { Text(confirmPasswordError!!, color = errorColor, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp)) }
                     Spacer(modifier = Modifier.height(10.dp))
 
                     // --- 3. Terms and Conditions Checkbox (Dynamic Colors) ---
@@ -414,39 +465,136 @@ fun SignupScreenContent(
 
                     Spacer(modifier = Modifier.height(40.dp))
 
-                    // --- 4. Next Button (Dynamic Colors) ---
+                    // --- 4. Register Button (Dynamic Colors) ---
                     Button(
                         onClick = {
                             if (validateInputs()) {
-                                scope.launch {
-                                    // You can use a more explicit route name if you have one
-                                    navController.navigate("VerificationScreen") {
-                                        popUpTo(navController.graph.startDestinationId) { inclusive = true }
+                                // CRITICAL STEP: Convert display date (DD/MM/YYYY) to API date (YYYY-MM-DD)
+                                val birthDate = DISPLAY_DATE_FORMAT.parse(birthDateText)
+
+                                if (birthDate != null && selectedRole != null) {
+                                    val apiBirthDate = API_DATE_FORMAT.format(birthDate)
+
+                                    viewModel.register(
+                                        firstName = firstName,
+                                        lastName = lastName,
+                                        email = email,
+                                        phoneNumber = phoneNumber,
+                                        birthDate = apiBirthDate, // <-- This MUST be in YYYY-MM-DD format
+                                        role = selectedRole!!,
+                                        password = password
+                                    )
+                                } else {
+                                    scope.launch {
+                                        // Should be caught by validateInputs, but a fallback just in case
+                                        snackbarHostState.showSnackbar("Missing required data (Date or Role). Please check inputs.", duration = SnackbarDuration.Short)
+                                        scrollState.animateScrollTo(0)
                                     }
                                 }
                             } else {
                                 // Scroll to the top to show the first error easily
                                 scope.launch {
-                                    delay(50) // Small delay to allow layout to update errors
+                                    snackbarHostState.showSnackbar("Please correct the errors above.", duration = SnackbarDuration.Short)
                                     scrollState.animateScrollTo(0)
                                 }
                             }
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(56.dp)
-                            .clip(RoundedCornerShape(12.dp)),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = primaryColor
-                        ),
-                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+                            .height(56.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
+                        enabled = !uiState.isLoading // Disable button while loading
                     ) {
-                        Text(text = "Next", color = MaterialTheme.colorScheme.onPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Icon(imageVector = Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Next", tint = MaterialTheme.colorScheme.onPrimary)
+                        if (uiState.isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                strokeWidth = 3.dp
+                            )
+                        } else {
+                            Text(
+                                text = "Register",
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = "Register",
+                                tint = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
+
+                    // Track registration success when message appears
+                    LaunchedEffect(uiState.errorMessage) {
+                        if (uiState.errorMessage != null) {
+                            val message = uiState.errorMessage
+                            if (message.contains("Account created successfully", ignoreCase = true) || 
+                                message.contains("check your email", ignoreCase = true)) {
+                                registrationSuccessful = true
+                            }
+                            // Also show resend success messages
+                            if (message.contains("re-sent", ignoreCase = true) || 
+                                message.contains("resent", ignoreCase = true)) {
+                                scope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        message = message,
+                                        duration = SnackbarDuration.Long
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // --- Resend Verification Email Button (shown after successful registration) ---
+                    if (registrationSuccessful && !uiState.isAuthenticated && email.isNotBlank()) {
+                        OutlinedButton(
+                            onClick = {
+                                if (email.isNotBlank()) {
+                                    viewModel.resendVerificationEmail(email)
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = Color.Transparent,
+                                contentColor = primaryColor
+                            ),
+                            border = BorderStroke(1.dp, primaryColor),
+                            enabled = !uiState.isLoading
+                        ) {
+                            if (uiState.isLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = primaryColor,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Email,
+                                    contentDescription = "Resend Email",
+                                    tint = primaryColor,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Resend Verification Email",
+                                    color = primaryColor,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
 
                     // --- 5. Social Login Buttons (Side-by-Side Row) ---
                     Row(
@@ -472,11 +620,10 @@ fun SignupScreenContent(
                             )
                         ) {
                             Icon(
-                                painter = painterResource(id = R.drawable.google),
+                                imageVector = Icons.Default.Search,
                                 contentDescription = "Signup with Google",
-                                modifier = Modifier.size(24.dp)
-                                    .padding(end = 8.dp),
-                                tint = Color.Unspecified
+                                modifier = Modifier.size(24.dp).padding(end = 8.dp),
+                                tint = Color(0xFF4285F4)
                             )
                             Text(
                                 text = "Google",
@@ -503,10 +650,9 @@ fun SignupScreenContent(
                             )
                         ) {
                             Icon(
-                                painter = painterResource(id = R.drawable.facebook),
+                                imageVector = Icons.Default.Star,
                                 contentDescription = "Signup with Facebook",
-                                modifier = Modifier.size(24.dp)
-                                    .padding(end = 8.dp),
+                                modifier = Modifier.size(24.dp).padding(end = 8.dp),
                                 tint = Color(0xFF1877F2)
                             )
                             Text(
@@ -536,11 +682,13 @@ fun SignupScreenContent(
         }
     )
 }
-// ----------------------------------------------------------------------------------
-// --- PREVIEW ---
-// ----------------------------------------------------------------------------------
+
 @Preview(showBackground = true, widthDp = 360, heightDp = 720)
 @Composable
 fun SignupScreenPreview() {
-    SignupScreen(navController = rememberNavController())
+    tn.esprit.dam.ui.theme.DAMTheme(darkTheme = false) {
+        SignupScreen(
+            navController = rememberNavController()
+        )
+    }
 }

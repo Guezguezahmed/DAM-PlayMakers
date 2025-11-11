@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    kotlin("plugin.serialization") version "1.9.22"
     alias(libs.plugins.kotlin.compose) // if you use the Kotlin Compose plugin (recommended)
 }
 
@@ -47,7 +48,13 @@ android {
 }
 
 dependencies {
-// Lottie for .lottie files
+
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.3")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:1.0.0")
+    implementation("com.squareup.retrofit2:retrofit:2.9.0") // Kotlin Serialization Converter for Retrofit
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0") // Kotlinx Serialization runtime
+    implementation("androidx.datastore:datastore-preferences:1.0.0") // DataStore for local JWT storage
 // Keep all Compose artifacts aligned with a single BOM
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))
 
@@ -81,6 +88,7 @@ dependencies {
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.palette.ktx)
     implementation(libs.androidx.room.ktx)
+    implementation(libs.androidx.media3.decoder)
 
     // Testing / Tooling
     debugImplementation("androidx.compose.ui:ui-tooling")
