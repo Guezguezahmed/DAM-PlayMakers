@@ -109,15 +109,17 @@ export class AuthService {
       if (savedUser.provider !== 'facebook' && savedUser.provider !== 'google') {
         try {
           console.log('📧 Tentative d\'envoi d\'email de vérification pour:', createUserDto.email);
+          const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001';
+          const verifyUrl = `${backendUrl}/api/v1/auth/verify-email?token=${verificationToken}`;
           await this.mailService.sendVerificationEmail(
             createUserDto.email,
-            verificationToken,
+            verifyUrl,
           );
           console.log('✅ Email de vérification envoyé avec succès');
         } catch (emailError) {
           console.error('❌ Erreur lors de l\'envoi de l\'email (non bloquant):', emailError.message);
-          console.error('❌ Code d\'erreur:', emailError.code);
-          console.error('❌ Response code:', emailError.responseCode);
+          console.error('❌ Response:', emailError.response?.body);
+          console.error('❌ Status:', emailError.status);
           console.error('❌ Stack trace:', emailError.stack);
           console.error('⚠️ L\'utilisateur a été créé mais l\'email de vérification n\'a pas pu être envoyé');
           console.error('⚠️ Vous pouvez renvoyer l\'email via POST /api/v1/auth/resend-verification');
@@ -326,9 +328,11 @@ export class AuthService {
     user.verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
     await user.save();
 
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001';
+    const verifyUrl = `${backendUrl}/api/v1/auth/verify-email?token=${verificationToken}`;
     await this.mailService.sendVerificationEmail(
       user.email,
-      verificationToken,
+      verifyUrl,
     );
 
     return {
