@@ -18,6 +18,14 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     const defaultCallbackURL = `${cleanBackendUrl}/api/v1/auth/google/redirect`;
     const callbackURL = configService.get<string>('GOOGLE_CALLBACK_URL') || defaultCallbackURL;
 
+    // Log pour déboguer l'URL de callback
+    console.log('🔧 [GOOGLE_STRATEGY] Configuration OAuth Google:');
+    console.log(`   → BACKEND_URL: ${backendUrl}`);
+    console.log(`   → URL nettoyée: ${cleanBackendUrl}`);
+    console.log(`   → GOOGLE_CALLBACK_URL: ${configService.get<string>('GOOGLE_CALLBACK_URL') || 'Non défini (utilisation de la valeur par défaut)'}`);
+    console.log(`   → Callback URL utilisée: ${callbackURL}`);
+    console.log(`   → ⚠️ Assurez-vous que cette URL est EXACTEMENT la même dans Google Cloud Console`);
+
     // Don't throw error at startup, let the guard handle it
     super({
       clientID,
@@ -36,6 +44,15 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       const email = profile.emails[0].value;
       const givenName = profile.name?.givenName;
       const familyName = profile.name?.familyName;
+      const displayName = profile.displayName;
+      const picture = profile.photos?.[0]?.value || profile._json?.picture;
+
+      console.log('📧 [GOOGLE_OAUTH] Données récupérées depuis Google:');
+      console.log(`   → Email: ${email}`);
+      console.log(`   → Prénom: ${givenName}`);
+      console.log(`   → Nom: ${familyName}`);
+      console.log(`   → Nom complet: ${displayName}`);
+      console.log(`   → Photo: ${picture ? 'Oui' : 'Non'}`);
 
       if (!email) {
         return done(new UnauthorizedException('Email is required from Google OAuth'), null);
@@ -47,7 +64,8 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
         email,
         givenName,
         familyName,
-        displayName: profile.displayName,
+        displayName,
+        picture,
       });
 
       if (!user) {
