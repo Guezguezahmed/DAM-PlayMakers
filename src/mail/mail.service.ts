@@ -23,14 +23,15 @@ export class MailService {
       
       // En développement, créer une instance vide (les emails échoueront mais l'app démarre)
       this.apiInstance = null;
-      this.senderEmail = process.env.MAIL_FROM_EMAIL || '9b8f34001@smtp-brevo.com';
+      this.senderEmail = process.env.MAIL_FROM_EMAIL || 'faidifakhri9@gmail.com';
       this.senderName = process.env.MAIL_FROM_NAME || 'PeakPlay';
       console.warn('⚠️ [MAIL_SERVICE] Mode développement: service d\'email désactivé');
       return;
     }
 
     // Charger MAIL_FROM_EMAIL et MAIL_FROM_NAME depuis .env
-    this.senderEmail = process.env.MAIL_FROM_EMAIL || '9b8f34001@smtp-brevo.com';
+    // IMPORTANT: Utilisez un sender validé dans Brevo (Settings > Senders & IP)
+    this.senderEmail = process.env.MAIL_FROM_EMAIL || 'faidifakhri9@gmail.com';
     this.senderName = process.env.MAIL_FROM_NAME || 'PeakPlay';
 
     // Initialiser l'API Brevo
@@ -150,7 +151,7 @@ export class MailService {
         name: this.senderName,
       },
       to: [{ email: to }],
-      subject: '🔐 Notification de connexion - DAM Backend',
+      subject: '🔐 Notification de connexion - PeakPlay',
       htmlContent: `
         <!DOCTYPE html>
         <html>
@@ -178,7 +179,7 @@ export class MailService {
                 ${loginInfo?.ip ? `<p><strong>Adresse IP :</strong> ${loginInfo.ip}</p>` : ''}
               </div>
               <p><strong>⚠️ Si vous n'êtes pas à l'origine de cette connexion, veuillez changer votre mot de passe immédiatement.</strong></p>
-              <p>Cordialement,<br>L'équipe DAM Backend</p>
+              <p>Cordialement,<br>L'équipe PeakPlay</p>
             </div>
             <div class="footer">
               <p>Ceci est un email automatique, merci de ne pas y répondre.</p>
