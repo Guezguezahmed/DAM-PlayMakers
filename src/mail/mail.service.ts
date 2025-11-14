@@ -74,7 +74,7 @@ export class MailService {
           </head>
           <body style="font-family: Arial; background:#f9fafb; padding:20px; margin:0;">
             <div style="max-width:600px; margin:auto; background:#ffffff; padding:30px; border-radius:10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-              <h2 style="color:#111827; text-align:center; margin-top:0;">Bienvenue sur PeakPlay 🎮</h2>
+              <h2 style="color:#111827; text-align:center; margin-top:0;">Bienvenue sur PeakPlay ⚽</h2>
               <p style="font-size:16px; color:#374151; line-height:1.6;">Merci de vous être inscrit. Cliquez sur le bouton ci-dessous pour vérifier votre email :</p>
               <div style="text-align:center; margin:30px 0;">
                 <a href="${url}" style="display:inline-block; background:#3b82f6; color:white; padding:14px 24px; border-radius:8px; text-decoration:none; font-weight:bold; text-align:center; font-size:16px; transition:background-color 0.2s;">Vérifier mon email</a>
@@ -153,39 +153,31 @@ export class MailService {
       to: [{ email: to }],
       subject: '🔐 Notification de connexion - PeakPlay',
       htmlContent: `
-        <!DOCTYPE html>
         <html>
-        <head>
-          <meta charset="utf-8">
-          <style>
-            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-            .header { background-color: #2196F3; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }
-            .content { background-color: #f9f9f9; padding: 30px; border-radius: 0 0 5px 5px; }
-            .info-box { background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0; }
-            .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <h2>🔐 Nouvelle connexion détectée</h2>
-            </div>
-            <div class="content">
-              <p>Bonjour,</p>
-              <p>Une connexion à votre compte a été effectuée avec succès.</p>
-              <div class="info-box">
-                <p><strong>Date et heure :</strong> ${formattedDate}</p>
-                ${loginInfo?.ip ? `<p><strong>Adresse IP :</strong> ${loginInfo.ip}</p>` : ''}
+          <head>
+            <meta charset="utf-8">
+          </head>
+          <body style="font-family: Arial; background:#f9fafb; padding:20px; margin:0;">
+            <div style="max-width:600px; margin:auto; background:#ffffff; padding:30px; border-radius:10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+              <h2 style="color:#111827; text-align:center; margin-top:0;">🔐 Nouvelle connexion détectée</h2>
+              <p style="font-size:16px; color:#374151; line-height:1.6;">Bonjour,</p>
+              <p style="font-size:16px; color:#374151; line-height:1.6;">Une connexion à votre compte PeakPlay ⚽ a été effectuée avec succès.</p>
+              <div style="background:#f5f5f5; padding:20px; border-radius:8px; margin:30px 0;">
+                <p style="font-size:14px; color:#374151; margin:10px 0;"><strong>Date et heure :</strong> ${formattedDate}</p>
+                ${loginInfo?.ip ? `<p style="font-size:14px; color:#374151; margin:10px 0;"><strong>Adresse IP :</strong> ${loginInfo.ip}</p>` : ''}
               </div>
-              <p><strong>⚠️ Si vous n'êtes pas à l'origine de cette connexion, veuillez changer votre mot de passe immédiatement.</strong></p>
-              <p>Cordialement,<br>L'équipe PeakPlay</p>
+              <p style="font-size:14px; color:#dc2626; line-height:1.6; background:#fef2f2; padding:15px; border-radius:8px; border-left:4px solid #dc2626;">
+                <strong>⚠️ Si vous n'êtes pas à l'origine de cette connexion, veuillez changer votre mot de passe immédiatement.</strong>
+              </p>
+              <p style="margin-top:30px; font-size:14px; color:#6b7280; line-height:1.6;">
+                Cordialement,<br>
+                <strong>L'équipe PeakPlay</strong>
+              </p>
+              <p style="margin-top:20px; font-size:12px; color:#9ca3af; text-align:center;">
+                Ceci est un email automatique, merci de ne pas y répondre.
+              </p>
             </div>
-            <div class="footer">
-              <p>Ceci est un email automatique, merci de ne pas y répondre.</p>
-            </div>
-          </div>
-        </body>
+          </body>
         </html>
       `,
     };
