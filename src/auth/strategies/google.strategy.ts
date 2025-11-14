@@ -14,7 +14,13 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     const clientSecret = configService.get<string>('GOOGLE_CLIENT_SECRET') || '';
     // Utiliser GOOGLE_CALLBACK_URL si défini, sinon construire depuis BACKEND_URL
     const backendUrl = configService.get<string>('BACKEND_URL') || 'http://localhost:3001';
-    const cleanBackendUrl = backendUrl.replace(/\/$/, ''); // Nettoyer le slash final
+    // Nettoyer l'URL : supprimer les espaces, les guillemets, les slashes finaux, et les caractères étranges
+    const cleanBackendUrl = backendUrl
+      .trim()                                    // Supprimer les espaces avant/après
+      .replace(/^["']|["']$/g, '')              // Supprimer les guillemets au début/fin
+      .replace(/\/+$/, '')                       // Supprimer les slashes finaux (un ou plusieurs)
+      .replace(/[=]+$/, '')                      // Supprimer les = à la fin (comme ==)
+      .replace(/\s+/g, '');                      // Supprimer tous les espaces
     const defaultCallbackURL = `${cleanBackendUrl}/api/v1/auth/google/redirect`;
     const callbackURL = configService.get<string>('GOOGLE_CALLBACK_URL') || defaultCallbackURL;
 
