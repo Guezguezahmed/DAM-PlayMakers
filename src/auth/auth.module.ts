@@ -8,9 +8,11 @@ import { User, UserSchema } from 'src/schemas/user.schemas';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy'; 
+import { EmailService } from 'src/verifmail/email.service';
 
 @Module({
   imports: [
+    ConfigModule,
     MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
     UsersModule, 
     
@@ -29,6 +31,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
   providers: [
     AuthService, 
     JwtStrategy,
+    EmailService,
     // GoogleStrategy removed - now provided by GoogleApiModule
   ],
   controllers: [AuthController],

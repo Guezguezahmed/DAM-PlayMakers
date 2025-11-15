@@ -33,6 +33,16 @@ export class User {
   @Prop({ required: false, default: false })
   emailVerified?: boolean;
 
+  // Email verification fields
+  @Prop({ type: String, default: null })
+  verificationCode: string | null;
+
+  @Prop({ type: Date, default: null })
+  codeExpiresAt: Date | null;
+
+  @Prop({ type: Boolean, default: false })
+  isVerified: boolean;
+
   @Prop({ required: false })
   picture?: string;
 }

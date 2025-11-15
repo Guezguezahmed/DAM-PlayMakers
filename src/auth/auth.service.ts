@@ -1,27 +1,31 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ConflictException, InternalServerErrorException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
-import { User } from 'src/schemas/user.schemas'; // <-- UserRole a été retiré
-import { UsersService } from 'src/users/users.service'; 
+import { User } from 'src/schemas/user.schemas';
+import { UsersService } from 'src/users/users.service';
+import { EmailService } from 'src/verifmail/email.service';
 
 @Injectable()
 export class AuthService {
   constructor(
-    @InjectModel(User.name) private userModel: Model<User>, 
+    @InjectModel(User.name) private userModel: Model<User>,
     private jwtService: JwtService,
-    private usersService: UsersService, 
+    private usersService: UsersService,
+    private emailService: EmailService,
   ) {}
 
-  // --- Méthodes Locales (Existantes) ---
-
+  // validate for login: also block if not verified
   async validateUser(email: string, password: string): Promise<any> {
     const user = await this.userModel.findOne({ email });
-    if (user && user.password && await bcrypt.compare(password, user.password)) {
-      const userObject = user.toObject();
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { password, ...result } = userObject;
+    if (!user) return null;
+    const matched = await bcrypt.compare(password, user.password);
+    if (user && matched) {
+      if (!user.isVerified) {
+        throw new UnauthorizedException('Veuillez vérifier votre email avant de vous connecter.');
+      }
+      const { password: _p, verificationCode: _v, codeExpiresAt: _c, ...result } = user.toObject();
       return result;
     }
     return null;
@@ -30,7 +34,7 @@ export class AuthService {
   async login(user: any) {
     const payload = {
       email: user.email,
-      userId: user._id.toString(), 
+      userId: user._id.toString(),
       role: user.role,
     };
     return {
@@ -39,144 +43,156 @@ export class AuthService {
     };
   }
 
+  // register: create user (isVerified false). Front should call send-code after register.
   async register(createUserDto: any) {
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
     const existingUser = await this.userModel.findOne({ email: createUserDto.email });
     if (existingUser) {
-        throw new Error('Utilisateur déjà existant'); 
+      throw new ConflictException('Utilisateur déjà existant');
     }
-    
+
     const newUser = new this.userModel({
       ...createUserDto,
       password: hashedPassword,
+      isVerified: false,
+      verificationCode: null,
+      codeExpiresAt: null,
     });
-    return newUser.save();
-  }
-  
-  // --- NOUVELLE Méthode Google Auth ---
-  
-  async handleGoogleLogin(googleUser: any): Promise<{ user: User, access_token: string }> {
-    let user = await this.userModel.findOne({ email: googleUser.email }); 
-    
-    if (!user) {
-      const newUser = await this.userModel.create({
-        email: googleUser.email,
-        nom: googleUser.lastName,
-        prenom: googleUser.firstName,
-        isVerified: true, 
-        role: 'JOUEUR', 
-      });
-      user = newUser;
-    }
-    
-    const userObject = user.toObject();
-    
-    const payload = { 
-      email: userObject.email, 
-      userId: userObject._id.toString(), 
-      role: userObject.role, 
-    };
+    const saved = await newUser.save();
 
-    return {
-      user: userObject,
-      access_token: this.jwtService.sign(payload),
-    };
+    // Generate and send verification code (non-blocking)
+    try {
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      saved.verificationCode = code;
+      saved.codeExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+      await saved.save();
+
+      await this.emailService.sendVerificationEmail(saved.email, saved.prenom, code);
+      console.log(`Verification code sent to ${saved.email}`);
+    } catch (err) {
+      console.error('Failed to send verification email:', err?.message || err);
+    }
+
+    // Don't return password, verificationCode, or codeExpiresAt
+    const userObject = saved.toObject();
+    const { password, verificationCode, codeExpiresAt, ...result } = userObject as any;
+    return result;
+  }
+
+  // send-code: only if user exists
+  async sendVerificationCode(email: string) {
+    const user = await this.userModel.findOne({ email });
+    if (!user) throw new NotFoundException('Utilisateur non trouvé');
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    user.verificationCode = code;
+    user.codeExpiresAt = expiresAt;
+    await user.save();
+
+    await this.emailService.sendVerificationEmail(user.email, user.prenom, code);
+    return { message: 'Code envoyé avec succès' };
+  }
+
+  // verify-code: validate and mark isVerified = true
+  async verifyCode(email: string, code: string) {
+    const user = await this.userModel.findOne({ email });
+    if (!user) throw new NotFoundException('Utilisateur non trouvé');
+
+    if (user.verificationCode !== code) throw new UnauthorizedException('Code incorrect');
+
+    if (!user.codeExpiresAt || user.codeExpiresAt < new Date()) {
+      user.verificationCode = null;
+      user.codeExpiresAt = null;
+      await user.save();
+      throw new UnauthorizedException('Code expiré');
+    }
+
+    // success: mark verified and clear code
+    user.isVerified = true;
+    user.verificationCode = null;
+    user.codeExpiresAt = null;
+    await user.save();
+
+    return { message: 'Compte vérifié avec succès' };
   }
 
   /**
-   * Trouve ou crée un utilisateur via OAuth (Google / Facebook)
+   * Envoie un code de réinitialisation si l'utilisateur existe.
    */
-  async findOrCreateOAuthUser(profile: {
-    provider?: string;
-    providerId?: string;
-    email?: string;
-    givenName?: string;
-    familyName?: string;
-    displayName?: string;
-    picture?: string;
-  }): Promise<any> {
-    const { provider, providerId } = profile;
-    let email = profile.email;
+  async sendPasswordResetCode(email: string) {
+    const user = await this.userModel.findOne({ email });
+    if (!user) throw new NotFoundException('Utilisateur non trouvé');
 
-    // ✅ fallback si le provider ne renvoie pas d'email
-    if (!email) {
-      email = `${providerId}@${provider}.local`;
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    user.verificationCode = code;
+    user.codeExpiresAt = expiresAt;
+    await user.save();
+
+    try {
+      await this.emailService.sendVerificationEmail(user.email, user.prenom, code);
+    } catch (err) {
+      user.verificationCode = null;
+      user.codeExpiresAt = null;
+      await user.save();
+      throw new InternalServerErrorException('Impossible d\'envoyer l\'email de reinitialisation');
     }
 
-    // 🔹 Recherche d'abord par provider et providerId
-    let user = await this.userModel.findOne({
-      provider: provider,
-      providerId: providerId,
-    });
+    return { message: 'Code de réinitialisation envoyé par email' };
+  }
 
-    // Si l'utilisateur existe déjà avec ce provider
-    if (user) {
-      // Google/Facebook garantissent déjà la vérification de l'email
-      // On marque donc l'email comme vérifié automatiquement
-      if (!user.emailVerified) {
-        user.emailVerified = true;
-        await user.save();
-      }
-      
-      const userObject = user.toObject();
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { password, ...result } = userObject;
-      return result;
+  /**
+   * Vérifie uniquement le code (utilisé pour l'étape où l'utilisateur entre le code).
+   * Ne modifie pas le mot de passe ni ne supprime le code : la suppression se fait après reset.
+   */
+  async verifyPasswordResetCode(email: string, code: string) {
+    const user = await this.userModel.findOne({ email });
+    if (!user) throw new NotFoundException('Utilisateur non trouvé');
+
+    if (!user.verificationCode || user.verificationCode !== code) {
+      throw new UnauthorizedException('Code incorrect');
     }
 
-    // 🔹 Si l'utilisateur n'existe pas, chercher par email (pour lier un compte existant)
-    user = await this.userModel.findOne({ email });
-
-    if (user) {
-      // Si l'utilisateur existe mais n'a pas de provider, on le lie
-      if (!user.provider || !user.providerId) {
-        user.provider = provider;
-        user.providerId = providerId;
-        await user.save();
-      }
-      
-      // Google/Facebook garantissent déjà la vérification de l'email
-      // On marque donc l'email comme vérifié automatiquement
-      if (!user.emailVerified) {
-        user.emailVerified = true;
-        await user.save();
-      }
-      
-      const userObject = user.toObject();
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { password, ...result } = userObject;
-      return result;
+    if (!user.codeExpiresAt || user.codeExpiresAt < new Date()) {
+      user.verificationCode = null;
+      user.codeExpiresAt = null;
+      await user.save();
+      throw new UnauthorizedException('Code expiré');
     }
 
-    // 🔹 Créer un nouvel utilisateur
-    const prenom = profile.givenName || profile.displayName || '';
-    const nom = profile.familyName || '';
-    const randomPassword = Math.random().toString(36).slice(-8);
-    const hashedPassword = await bcrypt.hash(randomPassword, 10);
+    return { message: 'Code valide' };
+  }
 
-    // Google et Facebook garantissent déjà la vérification de l'email
-    // On marque donc l'email comme vérifié automatiquement
-    const newUser = new this.userModel({
-      prenom,
-      nom,
-      email,
-      password: hashedPassword,
-      picture: profile.picture || '',
-      provider,
-      providerId,
-      role: 'JOUEUR',
-      age: new Date('1970-01-01'),
-      tel: 0,
-      // Google/Facebook garantissent déjà la vérification de l'email
-      emailVerified: true,
-    });
+  /**
+   * Reset le mot de passe : vérifie le code puis remplace le password hashé,
+   * supprime code et expiresAt après succès.
+   */
+  async resetPasswordWithCode(email: string, code: string, newPassword: string) {
+    const user = await this.userModel.findOne({ email });
+    if (!user) throw new NotFoundException('Utilisateur non trouvé');
 
-    const savedUser = await newUser.save();
-    console.log('✅ Nouvel utilisateur OAuth créé:', savedUser.email, 'Provider:', provider, '- Email automatiquement vérifié');
-    
-    const userObject = savedUser.toObject();
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { password, ...result } = userObject;
-    return result;
+    if (!user.verificationCode || user.verificationCode !== code) {
+      throw new UnauthorizedException('Code incorrect');
+    }
+
+    if (!user.codeExpiresAt || user.codeExpiresAt < new Date()) {
+      user.verificationCode = null;
+      user.codeExpiresAt = null;
+      await user.save();
+      throw new UnauthorizedException('Code expiré');
+    }
+
+    // Everything OK -> hash and replace password
+    const hashed = await bcrypt.hash(newPassword, 10);
+    user.password = hashed;
+    // clear reset code
+    user.verificationCode = null;
+    user.codeExpiresAt = null;
+    await user.save();
+
+    return { message: 'Mot de passe réinitialisé avec succès' };
   }
 }

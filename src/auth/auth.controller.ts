@@ -5,14 +5,10 @@ import {
   HttpStatus,
   Post,
   UnauthorizedException,
-  Get,
-  UseGuards,
-  Req,
-  Res,
+  BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
-import { GoogleAuthGuard } from '../google-api/guards/google-auth.guard';
 import {
   ApiTags,
   ApiOperation,
@@ -26,179 +22,176 @@ import { CreateUserDto } from 'src/users/dto/create-user.dto';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  // === Enregistrement ===
+  // REGISTER
   @Post('register')
   @ApiOperation({
     summary: 'Inscription utilisateur',
-    description: 'Crée un nouvel utilisateur dans la base de données',
+    description: 'Cree un nouvel utilisateur (isVerified=false). L\'utilisateur doit ensuite valider son email.',
   })
   @ApiResponse({
     status: 201,
-    description: 'Utilisateur créé avec succès.',
+    description: 'Utilisateur cree avec succes.',
   })
   @ApiResponse({
     status: 400,
-    description: 'Erreur de validation ou utilisateur déjà existant.',
+    description: 'Erreur de validation ou utilisateur deja existant.',
   })
   async register(@Body() createUserDto: CreateUserDto) {
     return this.authService.register(createUserDto);
   }
 
-  // === Connexion Locale ===
+  // LOGIN
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Connexion utilisateur',
-    description:
-      'Authentifie un utilisateur et retourne un token JWT à utiliser pour les routes protégées.',
+    description: 'Authentifie un utilisateur par email + mot de passe et retourne un token JWT.',
   })
   @ApiBody({
     schema: {
       type: 'object',
       properties: {
-        email: {
-          type: 'string',
-          example: 'wassimd@test.com',
-        },
-        password: {
-          type: 'string',
-          example: '123456',
-        },
+        email: { type: 'string', example: 'wassimd@test.com' },
+        password: { type: 'string', example: '123456' },
       },
+      required: ['email', 'password'],
     },
   })
   @ApiResponse({
     status: 200,
-    description: 'Connexion réussie. Retourne un token JWT.',
+    description: 'Connexion reussie. Retourne un JWT.',
     schema: {
-      example: {
-        access_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
-      },
+      example: { access_token: 'eyJhbGciOi...jwt...' },
     },
   })
   @ApiResponse({
     status: 401,
-    description: 'Email ou mot de passe incorrect.',
+    description: 'Email ou mot de passe incorrect, ou compte non verifie.',
   })
   async login(@Body() loginDto: { email: string; password: string }) {
-    const user = await this.authService.validateUser(
-      loginDto.email,
-      loginDto.password,
-    );
-
-    if (!user) {
-      throw new UnauthorizedException('Email ou mot de passe incorrect');
+    try {
+      const user = await this.authService.validateUser(loginDto.email, loginDto.password);
+      if (!user) throw new UnauthorizedException('Email ou mot de passe incorrect');
+      return this.authService.login(user);
+    } catch (err) {
+      throw err;
     }
-
-    return this.authService.login(user);
-  }
-  
-  // === Connexion Google: 1. Initialisation ===
-  @Get('google')
-  @ApiOperation({ 
-    summary: 'Démarrer l\'authentification Google OAuth',
-    description: `
-      **Route d'initialisation de l'authentification Google OAuth2.**
-      
-      **⚠️ IMPORTANT:** Cette route doit être appelée depuis un navigateur web, pas via Swagger UI.
-      
-      **Comment utiliser:**
-      1. Copiez l'URL complète: \`http://localhost:3001/api/v1/auth/google\`
-      2. Ouvrez-la directement dans votre navigateur
-      3. Vous serez redirigé vers la page de connexion Google
-      4. Après authentification, Google vous redirigera vers \`/auth/google/redirect\`
-      
-      **Configuration requise:**
-      - \`GOOGLE_CLIENT_ID\` et \`GOOGLE_CLIENT_SECRET\` doivent être configurés dans les variables d'environnement
-      - L'URL de callback doit être configurée dans Google Cloud Console
-    `,
-    tags: ['Google OAuth'],
-  })
-  @ApiResponse({ 
-    status: 302, 
-    description: 'Redirection vers la page de connexion Google',
-    headers: {
-      Location: {
-        description: 'URL de redirection vers Google OAuth',
-        schema: { type: 'string', example: 'https://accounts.google.com/o/oauth2/v2/auth?...' }
-      }
-    }
-  })
-  @ApiResponse({ 
-    status: 400, 
-    description: 'Google OAuth2 n\'est pas configuré. Vérifiez GOOGLE_CLIENT_ID et GOOGLE_CLIENT_SECRET dans votre .env'
-  })
-  @UseGuards(GoogleAuthGuard)
-  async googleAuth() {
-    // Cette méthode ne sera pas exécutée car GoogleAuthGuard initie la redirection
   }
 
-  // === Connexion Google: 2. Callback ===
-  @Get('google/redirect')
-  @ApiOperation({ 
-    summary: 'Callback Google OAuth (Génère le JWT)',
-    description: `
-      **Route de callback pour l'authentification Google OAuth2.**
-      
-      **⚠️ NE PAS APPELER DIRECTEMENT:** Cette route est appelée automatiquement par Google après l'authentification.
-      
-      **Flux d'authentification:**
-      1. L'utilisateur est redirigé vers Google pour se connecter
-      2. Google authentifie l'utilisateur et redirige vers cette route
-      3. Le système crée ou trouve l'utilisateur dans la base de données
-      4. Un token JWT est généré
-      5. L'utilisateur est redirigé vers le frontend avec le token dans l'URL
-      
-      **Réponse:**
-      - Redirection vers: \`{FRONTEND_URL}/auth/success?token={JWT_TOKEN}&role={USER_ROLE}\`
-      
-      **Note:** Si l'utilisateur n'existe pas, il sera automatiquement créé avec les informations de son compte Google.
-    `,
-    tags: ['Google OAuth'],
+  // SEND CODE (only for existing user)
+  @Post('send-code')
+  @ApiOperation({
+    summary: 'Envoyer un code de verification',
+    description: 'Genere un code et l\'envoie par email si l\'utilisateur existe deja.',
   })
-  @ApiResponse({ 
-    status: 302, 
-    description: 'Redirection vers le frontend avec le token JWT dans les paramètres d\'URL',
-    headers: {
-      Location: {
-        description: 'URL de redirection vers le frontend avec token',
-        schema: { 
-          type: 'string', 
-          example: 'http://localhost:4200/auth/success?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...&role=JOUEUR' 
-        }
-      }
-    }
-  })
-  @ApiResponse({ 
-    status: 401, 
-    description: 'Échec de l\'authentification Google',
+  @ApiBody({
     schema: {
-      example: {
-        statusCode: 401,
-        message: 'Google authentication failed'
-      }
-    }
+      type: 'object',
+      properties: {
+        email: { type: 'string', example: 'abdelliwassim100@gmail.com' },
+      },
+      required: ['email'],
+    },
   })
-  @ApiResponse({ 
-    status: 500, 
-    description: 'Erreur lors de la création ou de la récupération de l\'utilisateur'
+  @ApiResponse({ status: 201, description: 'Code envoye avec succes' })
+  @ApiResponse({ status: 404, description: 'Utilisateur non trouve' })
+  @ApiResponse({ status: 500, description: 'Impossible d\'envoyer l\'email' })
+  sendCode(@Body() body: { email: string }) {
+    return this.authService.sendVerificationCode(body.email);
+  }
+
+  // VERIFY CODE
+  @Post('verify-code')
+  @ApiOperation({
+    summary: 'Verifier le code de verification',
+    description: 'Verifie que le code est correct et non expire; marque le compte comme verifie.',
   })
-  @UseGuards(GoogleAuthGuard)
-  async googleAuthRedirect(@Req() req: any, @Res() res: any) {
-    if (!req.user) {
-      throw new UnauthorizedException('Google authentication failed');
-    }
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        email: { type: 'string', example: 'abdelliwassim100@gmail.com' },
+        code: { type: 'string', example: '123456' },
+      },
+      required: ['email', 'code'],
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Compte verifie avec succes' })
+  @ApiResponse({ status: 401, description: 'Code incorrect ou expire' })
+  @ApiResponse({ status: 404, description: 'Utilisateur non trouve' })
+  verifyCode(@Body() body: { email: string; code: string }) {
+    return this.authService.verifyCode(body.email, body.code);
+  }
 
-    // req.user is already the full user object from GoogleStrategy.validate()
-    // Use the login method to generate JWT token
-    const loginResult = await this.authService.login(req.user);
-    const token = loginResult.access_token;
+  // FORGOT PASSWORD - Step 1: Request reset code
+  @Post('forgot-password')
+  @ApiOperation({
+    summary: 'Demande de reinitialisation de mot de passe',
+    description: 'Envoie un code de reinitialisation au mail si l\'utilisateur existe.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        email: { type: 'string', example: 'user@example.com' },
+      },
+      required: ['email'],
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Code envoye par email si utilisateur existe' })
+  @ApiResponse({ status: 404, description: 'Utilisateur non trouve' })
+  forgotPassword(@Body() body: { email: string }) {
+    return this.authService.sendPasswordResetCode(body.email);
+  }
 
-    // Get frontend URL from environment or use default
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
-    const redirectUrl = `${frontendUrl.replace(/\/$/, '')}/auth/success?token=${token}&role=${req.user.role}`;
+  // FORGOT PASSWORD - Step 2: Verify reset code
+  @Post('forgot-password/verify-code')
+  @ApiOperation({
+    summary: 'Verifier le code de reinitialisation',
+    description: 'Verifie que le code recu par email est correct et non expire.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        email: { type: 'string', example: 'user@example.com' },
+        code: { type: 'string', example: '123456' },
+      },
+      required: ['email', 'code'],
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Code valide' })
+  @ApiResponse({ status: 401, description: 'Code incorrect ou expire' })
+  verifyResetCode(@Body() body: { email: string; code: string }) {
+    return this.authService.verifyPasswordResetCode(body.email, body.code);
+  }
 
-    // Note: Utiliser res.redirect() nécessite l'injection de @Res() et l'utilisation du paramètre natif Express/Fastify.
-    return res.redirect(redirectUrl);
+  // FORGOT PASSWORD - Step 3: Reset password (final step)
+  @Post('forgot-password/reset')
+  @ApiOperation({
+    summary: 'Reinitialiser le mot de passe',
+    description: 'Remplace l\'ancien mot de passe si le code est valide. Body: { email, code, newPassword, confirmPassword }',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        email: { type: 'string', example: 'user@example.com' },
+        code: { type: 'string', example: '123456' },
+        newPassword: { type: 'string', example: 'NouveauMdp123' },
+        confirmPassword: { type: 'string', example: 'NouveauMdp123' },
+      },
+      required: ['email', 'code', 'newPassword', 'confirmPassword'],
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Mot de passe reinitialise avec succes' })
+  @ApiResponse({ status: 400, description: 'Mots de passe non identiques' })
+  @ApiResponse({ status: 401, description: 'Code incorrect ou expire' })
+  @ApiResponse({ status: 404, description: 'Utilisateur non trouve' })
+  async resetPassword(@Body() body: { email: string; code: string; newPassword: string; confirmPassword: string }) {
+    const { email, code, newPassword, confirmPassword } = body;
+    if (newPassword !== confirmPassword) throw new BadRequestException('Les mots de passe ne correspondent pas');
+
+    return this.authService.resetPasswordWithCode(email, code, newPassword);
   }
 }
