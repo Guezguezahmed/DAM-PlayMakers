@@ -24,8 +24,8 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     }
 
     // Build callback URL from BACKEND_URL if not set
-    if (!callbackURL || callbackURL === 'http://localhost:3000/auth/google/callback') {
-      const backendUrl = configService.get<string>('BACKEND_URL') || 'http://localhost:3000';
+    if (!callbackURL || callbackURL === 'http://localhost:3001/auth/google/callback') {
+      const backendUrl = configService.get<string>('BACKEND_URL') || 'http://localhost:3001';
       // Clean the URL: remove spaces, quotes, trailing slashes, and strange characters
       const cleanBackendUrl = backendUrl
         .trim()                                    // Remove spaces before/after

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Vonage } from '@vonage/server-sdk';
 
 @Injectable()
@@ -7,10 +8,18 @@ export class OtpService {
 
   private otpStore: Map<string, { code: string; expires: number }> = new Map();
 
-  constructor() {
+  constructor(private configService: ConfigService) {
+    const apiKey = this.configService.get<string>('vonage.apiKey');
+    const apiSecret = this.configService.get<string>('vonage.apiSecret');
+
+    if (!apiKey || !apiSecret) {
+      console.warn('⚠️  Warning: Vonage API credentials are not configured. OTP SMS sending will fail.');
+      console.warn('Please set VONAGE_API_KEY and VONAGE_API_SECRET in your .env file');
+    }
+
     this.vonage = new Vonage({
-      apiKey: process.env.VONAGE_API_KEY,
-      apiSecret: process.env.VONAGE_API_SECRET,
+      apiKey: apiKey || '',
+      apiSecret: apiSecret || '',
     });
   }
 
@@ -22,9 +31,11 @@ export class OtpService {
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
     try {
+      const brandName = this.configService.get<string>('vonage.brandName') || 'Vonage';
+
       const response = await this.vonage.sms.send({
         to: phone,
-        from: process.env.VONAGE_BRAND_NAME || 'Vonage',
+        from: brandName,
         text: `Your OTP code is: ${otpCode}`,
       });
 
