@@ -21,7 +21,7 @@ import tn.esprit.dam.ui.theme.MediumGreen // Keep MediumGreen as it's a fixed ac
 // Define screen routes using strings that match the composable keys in MainActivity
 sealed class Screen(val route: String, val icon: ImageVector) {
     object Home : Screen("HomeScreen", Icons.Default.Home)
-    object Leaderboard : Screen("leaderboardScreen", Icons.Default.Leaderboard)
+    object Tournament : Screen("CreateTournamentScreen", Icons.Default.Leaderboard)
     object Events : Screen("EventsScreen", Icons.Default.EmojiEvents)
     object Share : Screen("SocialScreen", Icons.Default.Groups)
     object Profile : Screen("ProfileScreen", Icons.Default.Person)
@@ -29,7 +29,7 @@ sealed class Screen(val route: String, val icon: ImageVector) {
 
 val bottomNavItems = listOf(
     Screen.Home,
-    Screen.Leaderboard,
+    Screen.Tournament,
     Screen.Events,
     Screen.Share,
     Screen.Profile

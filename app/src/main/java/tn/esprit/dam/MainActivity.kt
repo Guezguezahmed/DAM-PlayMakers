@@ -1,6 +1,7 @@
 package tn.esprit.dam
 
 import android.os.Bundle
+import android.util.Log // Import Log for better debugging
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -12,6 +13,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import tn.esprit.dam.screens.CreateTournamentScreen
 import tn.esprit.dam.screens.EventsScreen
 import tn.esprit.dam.screens.ForgetPasswordScreen
 import tn.esprit.dam.screens.FriendsScreen
@@ -22,12 +24,13 @@ import tn.esprit.dam.screens.PasswordChangedScreen
 import tn.esprit.dam.screens.PlacmentScreen
 import tn.esprit.dam.screens.ProfileScreen // Keep this import
 import tn.esprit.dam.screens.ProfileScreenSettings
-// REMOVED: tn.esprit.dam.screens.ProfileScreenSettings (The function was renamed)
 import tn.esprit.dam.screens.SetNewPasswordScreen
 import tn.esprit.dam.screens.SignupScreen
 import tn.esprit.dam.screens.SocialScreen
 import tn.esprit.dam.screens.SplashScreen
 import tn.esprit.dam.screens.TeamsScreen
+import tn.esprit.dam.screens.TournamentCreateForumScreen
+import tn.esprit.dam.screens.TournamentDetails // Import the data class for the callback
 import tn.esprit.dam.screens.VerificationScreen
 import tn.esprit.dam.screens.VerificationResetScreen
 import tn.esprit.dam.screens.WelcomeScreen1
@@ -149,13 +152,30 @@ class MainActivity : ComponentActivity() {
                         HomeScreen(navController = navController)
                     }
                     composable(
-                        route = "leaderboardScreen",
+                        route = "CreateTournamentScreen",
                         enterTransition = { bottomNavSlideIn },
                         exitTransition = { bottomNavSlideOut },
                         popEnterTransition = { bottomNavSlideIn },
                         popExitTransition = { bottomNavSlideOut }
                     ) {
-                        LeaderboardScreen(navController = navController)
+                        CreateTournamentScreen(navController = navController)
+                    }
+                    composable(
+                        route = "TournamentCreateForumScreen",
+                        enterTransition = { bottomNavSlideIn },
+                        exitTransition = { bottomNavSlideOut },
+                        popEnterTransition = { bottomNavSlideIn },
+                        popExitTransition = { bottomNavSlideOut }
+                    ) {
+                        // FIX: Replace 'navController = navController' with the required callbacks.
+                        TournamentCreateForumScreen(
+                            onBackClicked = { navController.popBackStack() },
+                            onCreateClicked = { details ->
+                                // Implement your logic here, e.g., submitting data and navigating
+                                Log.d("TournamentCreation", "Tournament Created: ${details.name}")
+                                navController.popBackStack("HomeScreen", inclusive = false)
+                            }
+                        )
                     }
 
                     // Add placeholders for other bottom navigation items
