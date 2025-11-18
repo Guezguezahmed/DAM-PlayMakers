@@ -82,7 +82,7 @@ fun VerificationScreenContent(navController: NavController, viewModel: AuthViewM
     val scope = rememberCoroutineScope()
 
     // Display the email we have pending verification (if any)
-    val pendingEmail = viewModel.pendingVerificationEmail ?: viewModel.uiState.user?.user?.email ?: viewModel.uiState.user?.data?.email
+    val pendingEmail = viewModel.pendingVerificationEmail ?: viewModel.uiState.user?.user?.email
 
     // Countdown Timer logic
     LaunchedEffect(timerRunning) {

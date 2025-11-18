@@ -56,7 +56,6 @@ import tn.esprit.dam.data.ApiConfig
 import tn.esprit.dam.models.AuthViewModel // <-- CORRECTED IMPORT
 import androidx.compose.runtime.LaunchedEffect
 import android.content.Intent
-import android.net.Uri
 import androidx.core.net.toUri
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -90,9 +89,9 @@ fun LoginScreen(
             // Success: User is authenticated, navigate to Home Screen
             android.util.Log.d("LoginScreen", "=== NAVIGATION TO HOMESCREEN ===")
             android.util.Log.d("LoginScreen", "isAuthenticated = ${uiState.isAuthenticated}")
-            android.util.Log.d("LoginScreen", "User: ${uiState.user?.user?.email ?: uiState.user?.data?.email ?: "N/A"}")
-            android.util.Log.d("LoginScreen", "Token present: ${uiState.user?.token != null || uiState.user?.accessToken != null}")
-            
+            android.util.Log.d("LoginScreen", "User: ${uiState.user?.user?.email ?: "N/A"}")
+            android.util.Log.d("LoginScreen", "Token present: ${uiState.user?.access_token != null}")
+
             // Show success message
             Toast.makeText(context, "Login successful! Welcome back.", Toast.LENGTH_SHORT).show()
             

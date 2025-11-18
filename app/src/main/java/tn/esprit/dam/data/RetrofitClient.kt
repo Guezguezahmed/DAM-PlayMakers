@@ -13,6 +13,14 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import android.util.Log
 import okio.Buffer
+import tn.esprit.dam.api.TournamentApiService
+import retrofit2.converter.gson.GsonConverterFactory
+import android.content.Context
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 
 // This object handles the initialization and configuration of the Retrofit HTTP client.
 object RetrofitClient {
@@ -201,11 +209,60 @@ object RetrofitClient {
         Retrofit.Builder()
             .baseUrl(BASE_URL)
             .client(httpClient)
-            .addConverterFactory(json.asConverterFactory(contentType))
+            .addConverterFactory(GsonConverterFactory.create()) // Use Gson for JSON
             .build()
     }
 
-    // Publicly exposed service interfaces
+    // DataStore for JWT (replace with your actual key and storage logic)
+    val Context.dataStore by preferencesDataStore(name = "auth_prefs")
+    val JWT_KEY = stringPreferencesKey("jwt_token")
+
+    // Make getJwtToken public so it can be used for debugging in the UI
+    fun getJwtToken(context: Context): String? = runBlocking {
+        try {
+            val prefs = context.dataStore.data.first()
+            prefs[JWT_KEY]
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun authInterceptor(context: Context) = Interceptor { chain ->
+        val requestBuilder = chain.request().newBuilder()
+        val jwt = getJwtToken(context)
+        if (!jwt.isNullOrBlank()) {
+            requestBuilder.addHeader("Authorization", "Bearer $jwt")
+        }
+        chain.proceed(requestBuilder.build())
+    }
+
+    fun getHttpClient(context: Context): OkHttpClient {
+        return OkHttpClient.Builder()
+            .addInterceptor(authInterceptor(context))
+            .addInterceptor(loggingInterceptor)
+            .addInterceptor(retryInterceptor)
+            .connectTimeout(300, TimeUnit.SECONDS)
+            .readTimeout(300, TimeUnit.SECONDS)
+            .writeTimeout(300, TimeUnit.SECONDS)
+            .build()
+    }
+
+    fun getRetrofit(context: Context): Retrofit {
+        Log.d("Retrofit", "Initializing Retrofit with BASE_URL = $BASE_URL")
+        if (!BASE_URL.startsWith("http")) {
+            throw IllegalStateException("BASE_URL must start with 'http://' or 'https://'. Current value: $BASE_URL")
+        }
+        return Retrofit.Builder()
+            .baseUrl(BASE_URL)
+            .client(getHttpClient(context))
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+    }
+
+    fun getTournamentApiService(context: Context): TournamentApiService {
+        return getRetrofit(context).create(TournamentApiService::class.java)
+    }
+
     val authService: AuthService by lazy {
         retrofit.create(AuthService::class.java)
     }

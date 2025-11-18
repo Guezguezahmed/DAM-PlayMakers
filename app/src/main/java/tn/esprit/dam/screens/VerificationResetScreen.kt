@@ -67,7 +67,7 @@ fun VerificationResetContent(navController: NavController, viewModel: AuthViewMo
     val uiState = viewModel.uiState // Observe the UI state
 
     // Get the email from the ViewModel state, which should have been set in ForgetPasswordScreen
-    val pendingEmail = viewModel.pendingVerificationEmail ?: viewModel.uiState.user?.user?.email ?: viewModel.uiState.user?.data?.email
+    val pendingEmail = viewModel.pendingVerificationEmail ?: viewModel.uiState.user?.user?.email
 
     // Display error messages from ViewModel
     LaunchedEffect(uiState.errorMessage) {

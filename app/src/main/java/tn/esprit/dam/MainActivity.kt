@@ -167,14 +167,10 @@ class MainActivity : ComponentActivity() {
                         popEnterTransition = { bottomNavSlideIn },
                         popExitTransition = { bottomNavSlideOut }
                     ) {
-                        // FIX: Replace 'navController = navController' with the required callbacks.
+                        // Pass navController and a dummy userId for now
                         TournamentCreateForumScreen(
-                            onBackClicked = { navController.popBackStack() },
-                            onCreateClicked = { details ->
-                                // Implement your logic here, e.g., submitting data and navigating
-                                Log.d("TournamentCreation", "Tournament Created: ${details.name}")
-                                navController.popBackStack("HomeScreen", inclusive = false)
-                            }
+                            navController = navController,
+                            currentUserId = "USER_ID_PLACEHOLDER"
                         )
                     }
 

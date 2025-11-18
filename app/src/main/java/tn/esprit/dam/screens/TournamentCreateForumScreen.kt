@@ -23,7 +23,29 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
+import android.widget.Toast
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import tn.esprit.dam.api.dto.CreateCoupeRequest
+import tn.esprit.dam.data.RetrofitClient
 import tn.esprit.dam.ui.theme.DAMTheme
+import java.util.Locale
+
+/*
+Example values to use in the TournamentCreateForumScreen fields:
+
+Tournament Name: Champions League 2025
+Stadium: National Stadium
+Referee: John Doe
+Date: 12/25/25
+Time: 14:30
+Max Participants: 16
+Entry Fee (Optional): 25
+Prize Pool (Optional): 500
+
+These values will create a tournament scheduled for December 25, 2025 at 2:30 PM, with 16 participants, a referee named John Doe, an entry fee of 25, and a prize pool of 500.
+*/
 
 // --- Data Model (Updated) ---
 
@@ -33,7 +55,7 @@ data class TournamentDetails(
     val date: String = "",
     val time: String = "",
     val maxParticipants: String = "",
-    val referee: String = "", // <-- NEW ATTRIBUTE
+    val referee: String = "", // This should be an ID in production
     val entryFee: String = "",
     val prizePool: String = ""
 )
@@ -42,14 +64,16 @@ data class TournamentDetails(
 
 @Composable
 fun TournamentCreateForumScreen(
-    onBackClicked: () -> Unit = {},
-    onCreateClicked: (TournamentDetails) -> Unit = {}
+    navController: androidx.navigation.NavHostController,
+    currentUserId: String // <-- Add this parameter for the authenticated user
 ) {
     // State to hold form data
     var details by remember { mutableStateOf(TournamentDetails()) }
 
     // Scroll state for the main content area
     val scrollState = rememberScrollState()
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     // Check if the form is valid (now includes referee)
     val isFormValid = details.name.isNotBlank() &&
@@ -73,7 +97,7 @@ fun TournamentCreateForumScreen(
                 ) {
                     // Back Button
                     OutlinedButton(
-                        onClick = onBackClicked,
+                        onClick = { /*TODO*/ },
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(vertical = 14.dp),
                         shape = RoundedCornerShape(12.dp),
@@ -84,7 +108,67 @@ fun TournamentCreateForumScreen(
 
                     // Create Tournament Button
                     Button(
-                        onClick = { onCreateClicked(details) },
+                        onClick = {
+                            coroutineScope.launch {
+                                try {
+                                    val maxParticipants = details.maxParticipants.toIntOrNull()
+                                    val entryFee = details.entryFee.toIntOrNull()
+                                    val prizePool = details.prizePool.toIntOrNull()
+                                    val refereeList = listOf(details.referee) // Should be a list of IDs
+
+                                    // Fix date parsing to match yyyy-MM-dd and HH:mm input
+                                    val inputFormat = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+                                    val outputFormat = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.getDefault())
+                                    val dateTimeString = "${details.date} ${details.time}" // e.g. 2025-01-01 14:00
+                                    val dateDebut: String = try {
+                                        val parsedDate = inputFormat.parse(dateTimeString)!!
+                                        outputFormat.format(parsedDate)
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("TournamentCreate", "Date parsing error", e)
+                                        ""
+                                    }
+                                    val dateFin = dateDebut
+
+                                    if (maxParticipants == null || dateDebut.isEmpty()) {
+                                        Toast.makeText(context, "Invalid input. Please check your entries.", Toast.LENGTH_SHORT).show()
+                                        return@launch
+                                    }
+
+                                    val request = CreateCoupeRequest(
+                                        nom = details.name,
+                                        participants = emptyList(),
+                                        dateDebut = dateDebut,
+                                        dateFin = dateFin,
+                                        tournamentName = details.name,
+                                        stadium = details.stadium,
+                                        date = details.date, // e.g. 12/25/25 or 2025-12-25
+                                        time = details.time, // e.g. 14:30
+                                        maxParticipants = maxParticipants,
+                                        entryFee = entryFee,
+                                        prizePool = prizePool,
+                                        referee = refereeList,
+                                        statut = "PROGRAMME"
+                                    )
+
+                                    // DEBUG: Log the JWT before making the API call
+                                    val jwt = tn.esprit.dam.data.RetrofitClient.getJwtToken(context)
+                                    android.util.Log.d("TournamentCreate", "JWT used for Authorization: $jwt")
+
+                                    val api = RetrofitClient.getTournamentApiService(context)
+                                    val response = api.createCoupe(request)
+                                    if (response.isSuccessful) {
+                                        Toast.makeText(context, "Tournament created successfully!", Toast.LENGTH_LONG).show()
+                                        navController.popBackStack()
+                                    } else {
+                                        android.util.Log.e("TournamentCreate", "API error: ${response.code()} ${response.message()}")
+                                        Toast.makeText(context, "Failed to create tournament.", Toast.LENGTH_LONG).show()
+                                    }
+                                } catch (e: Exception) {
+                                    android.util.Log.e("TournamentCreate", "Exception: ${e.message}", e)
+                                    Toast.makeText(context, "An error occurred.", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
                         modifier = Modifier.weight(1f),
                         enabled = isFormValid, // Disabled if form is not valid
                         contentPadding = PaddingValues(vertical = 14.dp),
@@ -114,7 +198,7 @@ fun TournamentCreateForumScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // Navigation Icon (Back Button)
-                    IconButton(onClick = onBackClicked) {
+                    IconButton(onClick = { /*TODO*/ }) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
@@ -336,17 +420,21 @@ fun FormTextField(
 @Preview(showBackground = true, name = "Light Theme")
 @Composable
 fun TournamentCreateForumScreenPreviewLight() {
-    // Apply the custom DAMTheme for the Light scheme
     DAMTheme(darkTheme = false) {
-        TournamentCreateForumScreen()
+        TournamentCreateForumScreen(
+            navController = androidx.navigation.compose.rememberNavController(),
+            currentUserId = "PREVIEW_USER_ID"
+        )
     }
 }
 
 @Preview(showBackground = true, name = "Dark Theme")
 @Composable
 fun TournamentCreateForumScreenPreviewDark() {
-    // Apply the custom DAMTheme for the Dark scheme
     DAMTheme(darkTheme = true) {
-        TournamentCreateForumScreen()
+        TournamentCreateForumScreen(
+            navController = androidx.navigation.compose.rememberNavController(),
+            currentUserId = "PREVIEW_USER_ID"
+        )
     }
 }

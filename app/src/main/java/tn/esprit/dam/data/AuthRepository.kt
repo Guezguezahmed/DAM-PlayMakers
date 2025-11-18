@@ -14,7 +14,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.Serializable
 import retrofit2.HttpException
 import tn.esprit.dam.models.AuthResponse
 import tn.esprit.dam.models.LoginDto
@@ -34,17 +37,18 @@ class AuthRepository(private val app: Application) {
 
     // Define DataStore keys
     companion object {
-        private val AUTH_TOKEN_KEY = stringPreferencesKey("auth_token")
+        private val AUTH_TOKEN_KEY = stringPreferencesKey("jwt_token") // CHANGED from "auth_token" to "jwt_token" to match RetrofitClient
         private val REMEMBER_ME_KEY = booleanPreferencesKey("remember_me")
         // Pending verification email key, also used to temporarily store the email during password reset
         private val PENDING_EMAIL_KEY = stringPreferencesKey("pending_verification_email")
         // Forgot password context keys
         private val FORGOT_PASSWORD_EMAIL_KEY = stringPreferencesKey("forgot_password_email")
         private val FORGOT_PASSWORD_CODE_KEY = stringPreferencesKey("forgot_password_code")
+        private val USER_JSON_KEY = stringPreferencesKey("user_json")
     }
 
     // Get the Retrofit service instance
-    private val authService = RetrofitClient.authService
+    private val authService: AuthService = RetrofitClient.authService
 
     // --- Token Management ---
     suspend fun saveToken(token: String) {
@@ -128,6 +132,26 @@ class AuthRepository(private val app: Application) {
         }
     }
 
+    // --- User Management ---
+    suspend fun saveUser(user: tn.esprit.dam.models.User?) {
+        app.dataStore.edit { preferences ->
+            if (user == null) {
+                preferences.remove(USER_JSON_KEY)
+            } else {
+                preferences[USER_JSON_KEY] = Json.encodeToString(tn.esprit.dam.models.User.serializer(), user)
+            }
+        }
+    }
+
+    suspend fun getUser(): tn.esprit.dam.models.User? {
+        val json = app.dataStore.data.map { it[USER_JSON_KEY] }.first()
+        return if (json.isNullOrBlank()) null else Json.decodeFromString(tn.esprit.dam.models.User.serializer(), json)
+    }
+
+    suspend fun clearUser() {
+        app.dataStore.edit { it.remove(USER_JSON_KEY) }
+    }
+
     // --- API Calls: Authentication ---
     suspend fun login(credentials: LoginDto): Result<AuthResponse> {
         val startTime = System.currentTimeMillis()
@@ -156,31 +180,20 @@ class AuthRepository(private val app: Application) {
             Log.d("AuthRepository", "Response received after ${elapsedTime}ms")
 
             // Normalize user object: prefer response.user or response.data
-            val user = response.user ?: response.data
-
-            val finalResponse = if (user != null) {
-                // If server set isVerified but not emailVerified, promote the flag so UI treats the account as verified
-                val promotedEmailVerified = user.emailVerified ?: user.isVerified ?: false
-                val normalizedUser = user.copy(
-                    emailVerified = promotedEmailVerified,
-                    isVerified = promotedEmailVerified, // Ensure consistency
-                    verificationCode = null,
-                    codeExpiresAt = null
-                )
-                response.copy(user = normalizedUser, data = normalizedUser)
-            } else {
-                response
-            }
-
+            val user = response.user
+            val finalResponse = response
             Log.d("AuthRepository", "Normalized response user: ${finalResponse.user}")
-
-            val tokenToSave = finalResponse.token ?: finalResponse.accessToken
+            val tokenToSave = finalResponse.access_token
+            Log.d("AuthRepository", "Token in response: access_token=${finalResponse.access_token}")
             if (!tokenToSave.isNullOrBlank()) {
                 Log.d("AuthRepository", "Token found in response, saving to DataStore")
                 saveToken(tokenToSave)
             } else {
                 Log.w("AuthRepository", "⚠️ No token in login response body. Proceeding (assuming session/cookie auth).")
             }
+
+            // Save user info after login
+            saveUser(response.user)
 
             Log.d("AuthRepository", "=== LOGIN SUCCESS ===")
             Log.d("AuthRepository", "═══════════════════════════════════════════════════")
@@ -217,14 +230,12 @@ class AuthRepository(private val app: Application) {
                 throw HttpException(httpResponse)
             }
 
-            val response = httpResponse.body() ?: AuthResponse(
-                message = "Account created successfully. Please check your email for the verification code."
-            )
+            val response = httpResponse.body() ?: AuthResponse()
 
             Log.d("AuthRepository", "=== API CALL SUCCEEDED ===")
-            Log.d("AuthRepository", "Response message: ${response.message}")
 
-            val tokenToSave = response.token ?: response.accessToken
+            val tokenToSave = response.access_token
+            Log.d("AuthRepository", "Token in response: access_token=${response.access_token}")
             if (!tokenToSave.isNullOrBlank()) {
                 Log.d("AuthRepository", "Token found, saving to DataStore")
                 saveToken(tokenToSave)
@@ -232,8 +243,11 @@ class AuthRepository(private val app: Application) {
                 Log.d("AuthRepository", "No token in response (expected for email verification flow)")
             }
 
+            // Save user info after registration
+            saveUser(response.user)
+
             // Persist pending email so the verification screen can access it
-            val responseEmail = response.email ?: response.user?.email ?: response.data?.email ?: userData.email
+            val responseEmail = response.user?.email ?: userData.email
             if (!responseEmail.isNullOrBlank()) {
                 Log.d("AuthRepository", "Persisting pending verification email to DataStore: $responseEmail")
                 savePendingVerificationEmail(responseEmail)
@@ -274,7 +288,7 @@ class AuthRepository(private val app: Application) {
                 throw HttpException(httpResponse)
             }
 
-            val response = httpResponse.body() ?: AuthResponse(message = "Verification code resent successfully.")
+            val response = httpResponse.body() ?: AuthResponse()
 
             Log.d("AuthRepository", "=== RESEND SUCCESS ===")
             Result.success(response)
@@ -304,7 +318,7 @@ class AuthRepository(private val app: Application) {
                 throw HttpException(httpResponse)
             }
 
-            val response = httpResponse.body() ?: throw IOException("Verification successful but response body is null.")
+            val response = httpResponse.body() ?: AuthResponse()
 
             // Clear pending email after successful verification
             clearPendingVerificationEmail()
@@ -346,7 +360,7 @@ class AuthRepository(private val app: Application) {
                 throw HttpException(httpResponse)
             }
 
-            val response = httpResponse.body() ?: AuthResponse(message = "Password reset code sent to your email.")
+            val response = httpResponse.body() ?: AuthResponse()
 
             // Persist the email so the next step (Verify Code) can access it
             savePendingVerificationEmail(email.trim())
@@ -382,7 +396,7 @@ class AuthRepository(private val app: Application) {
                 throw HttpException(httpResponse)
             }
 
-            val response = httpResponse.body() ?: AuthResponse(message = "Code verified successfully.")
+            val response = httpResponse.body() ?: AuthResponse()
 
             // We keep the email in PENDING_EMAIL_KEY for the final reset step (Step 3)
 
@@ -417,7 +431,7 @@ class AuthRepository(private val app: Application) {
                 throw HttpException(httpResponse)
             }
 
-            val response = httpResponse.body() ?: AuthResponse(message = "Password reset successfully. You can now log in.")
+            val response = httpResponse.body() ?: AuthResponse()
 
             // Clear pending email after successful password reset
             clearPendingVerificationEmail()

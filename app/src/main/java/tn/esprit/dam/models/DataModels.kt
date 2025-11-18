@@ -54,22 +54,6 @@ data class Team(
 )
 
 // --- User and Profile Data Models ---
-@Serializable
-data class User(
-    @SerialName("_id")
-    val id: String? = null,
-    val prenom: String? = null,
-    val nom: String? = null,
-    val email: String? = null,
-    val age: String? = null,
-    val emailVerified: Boolean? = null,
-    val isVerified: Boolean? = null,
-    val verificationCode: String? = null,
-    val codeExpiresAt: String? = null,
-    val tel: String? = null,
-    val role: String? = null
-)
-
 data class UserProfile(
     val initials: String,
     val name: String,

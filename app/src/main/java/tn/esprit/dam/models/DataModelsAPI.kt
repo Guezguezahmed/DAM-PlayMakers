@@ -1,49 +1,27 @@
 package tn.esprit.dam.models
 
+import com.google.gson.annotations.SerializedName
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 // --- DTO for Authentication Responses ---
-@Serializable
 data class AuthResponse(
-    // The server might return the token as 'token'
-    val token: String? = null,
-    // The server might return the token as 'access_token' (map snake_case)
-    @SerialName("access_token")
-    val accessToken: String? = null,
-    val user: User? = null,
-    val message: String? = null,
-    // Additional fields that might be present
-    val data: User? = null, // Some APIs wrap user in 'data'
-    val success: Boolean? = null, // Some APIs return success flag
-    val status: String? = null, // Some APIs return status
+    val access_token: String? = null,
+    val user: User? = null
+)
 
-    // Direct user fields from registration response (used if the user object isn't nested)
-    @SerialName("prenom")
+@Serializable
+data class User(
+    val _id: String? = null,
     val prenom: String? = null,
-    @SerialName("nom")
     val nom: String? = null,
     val email: String? = null,
-
-    // FIX: Changed to String? because the server returns phone numbers as a String,
-    // which caused the 'String' vs 'Long' type mismatch error during compilation/parsing.
-    val tel: String? = null,
-
-    // Represents a date string (e.g., "2000-01-01T00:00:00.000Z")
     val age: String? = null,
+    val tel: String? = null,
     val role: String? = null,
-    @SerialName("emailVerified")
     val emailVerified: Boolean? = null,
-    @SerialName("isVerified")
-    val isVerified: Boolean? = null,
-    @SerialName("_id")
-    val id: String? = null
-) {
-    // Helper function to get email from any field (renamed to avoid conflict with the email property getter)
-    fun extractEmail(): String? {
-        return email ?: user?.email ?: data?.email
-    }
-}
+    val isVerified: Boolean? = null
+)
 
 // --- DTO for User Login Request ---
 @Serializable
@@ -81,28 +59,6 @@ data class RegisterDto(
     val password: String
 )
 
-// --- User Model (Removed: use User from DataModels.kt) ---
-//@Serializable
-//data class User(
-//    @SerialName("_id")
-//    val id: String? = null,
-//    val prenom: String? = null,
-//    val nom: String? = null,
-//    val email: String? = null,
-//
-//    // FIX: Changed to String? to match the server's JSON output.
-//    val tel: String? = null,
-//
-//    val role: String? = null,
-//    val age: String? = null, // Store as String (YYYY-MM-DD or ISO format from DB)
-//    @SerialName("emailVerified")
-//    val emailVerified: Boolean? = null,
-//    @SerialName("isVerified")
-//    val isVerified: Boolean? = null,
-//    // verificationCode and codeExpiresAt may be present before verification; make them nullable
-//    val verificationCode: String? = null,
-//    val codeExpiresAt: String? = null
-//)
 
 // --- Resend Verification Email Request DTO (Also used for Forgot Password step 1) ---
 @Serializable

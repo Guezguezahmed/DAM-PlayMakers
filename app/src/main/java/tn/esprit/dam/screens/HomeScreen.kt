@@ -1,16 +1,18 @@
 package tn.esprit.dam.screens
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -19,12 +21,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.rememberNavController
 import tn.esprit.dam.R
 import tn.esprit.dam.screens.cards.GameEntry
 import tn.esprit.dam.screens.cards.GameListItem
@@ -45,18 +47,16 @@ private val gameList = listOf(
 // NEW: Extracted the main content Column to avoid Scaffold/NavHostController issues in preview
 @Composable
 fun HomeContent(paddingValues: PaddingValues = PaddingValues(0.dp)) {
-    // Dynamic Theme Colors
-    // MAPPING:
-    // LightBackground (Top Section) -> MaterialTheme.colorScheme.background
-    // DarkBackground (List Section) -> MaterialTheme.colorScheme.surface
     val topBackgroundColor = MaterialTheme.colorScheme.background
     val listBackgroundColor = MaterialTheme.colorScheme.surface
 
+    // Make the whole content scrollable
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(topBackgroundColor) // Top part uses Background
+            .background(topBackgroundColor)
             .padding(paddingValues)
+            .verticalScroll(rememberScrollState())
     ) {
         // Top part of the screen
         TopSection()
@@ -65,8 +65,8 @@ fun HomeContent(paddingValues: PaddingValues = PaddingValues(0.dp)) {
         // --- Bottom Column with rounded top corners for cards/list ---
         Column(
             modifier = Modifier
-                .fillMaxSize() // Fills remaining space
-                .clip(RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp)) // Rounded top corners
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp))
                 .background(listBackgroundColor) // Bottom part uses Surface (for contrast)
         ) {
             Spacer(modifier = Modifier.height(12.dp))
@@ -75,13 +75,16 @@ fun HomeContent(paddingValues: PaddingValues = PaddingValues(0.dp)) {
             TabBar()
 
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.heightIn(min = 0.dp, max = 400.dp),
                 contentPadding = PaddingValues(bottom = 16.dp)
             ) {
                 items(gameList) { game ->
                     GameListItem(game = game)
                 }
             }
+            // --- Shared Preferences Debug Section at the bottom ---
+            SharedPrefsDebugSectionWithUser()
+            DataStoreUserDebugSection()
         }
     }
 }
@@ -95,17 +98,31 @@ fun HomeScreen(navController: NavHostController) {
         bottomBar = { HomeBottomNavigationBar(navController = navController) },
         modifier = Modifier.fillMaxSize()
     ) { paddingValues ->
-        HomeContent(paddingValues)
+        Column(modifier = Modifier.fillMaxSize()) {
+            HomeContent(paddingValues)
+        }
     }
 }
 
 // --- Helper Composables (Colors changed to MaterialTheme) ---
 @Composable
-fun TopSection(viewModel: tn.esprit.dam.models.AuthViewModel = androidx.lifecycle.viewmodel.compose.viewModel()) {
-    val uiState = viewModel.uiState
-    val user = uiState.user?.user ?: uiState.user?.data
-    val playerName =
-        if (user != null) listOfNotNull(user.prenom, user.nom).joinToString(" ").ifBlank { user.email ?: "Player" } else "Player Name"
+fun TopSection() {
+    val context = LocalContext.current
+    var playerName by remember { mutableStateOf("Player Name") }
+    LaunchedEffect(Unit) {
+        try {
+            val app = context.applicationContext as android.app.Application
+            val repo = tn.esprit.dam.data.AuthRepository(app)
+            val user = repo.getUser()
+            playerName = if (user != null) {
+                listOfNotNull(user.prenom, user.nom).joinToString(" ").ifBlank { user.email ?: "Player" }
+            } else {
+                "Player Name"
+            }
+        } catch (_: Exception) {
+            playerName = "Player Name"
+        }
+    }
     val onBackgroundColor = MaterialTheme.colorScheme.onBackground
     val primaryColor = MaterialTheme.colorScheme.primary
 
@@ -165,8 +182,7 @@ fun StatsSection() {
             }
 
             // Vertical Divider (Central separator)
-            Divider(
-                // Use subtle contrast color based on background
+            HorizontalDivider(
                 color = onBackgroundColor.copy(alpha = 0.2f),
                 modifier = Modifier
                     .height(60.dp)
@@ -191,7 +207,7 @@ fun StatsSection() {
             Text("Winrate", color = onBackgroundColor, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.width(8.dp))
             LinearProgressIndicator(
-                progress = 0.75f,
+                progress = { 0.75f },
                 modifier = Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(50)),
                 color = secondaryColor, // Use Secondary for progress color
                 // Use a subtle surface variant for the track
@@ -257,6 +273,104 @@ fun TabBar() {
                     fontSize = 14.sp
                 )
             }
+        }
+    }
+}
+
+@Composable
+fun SharedPrefsDebugSectionWithUser() {
+    val context = LocalContext.current
+    var prefsDump by remember { mutableStateOf("Loading...") }
+    var userInfo by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        try {
+            val app = context.applicationContext as android.app.Application
+            val repo = tn.esprit.dam.data.AuthRepository(app)
+            val token = repo.getToken() ?: "<none>"
+            val rememberMe = repo.getRememberMe().toString()
+            val pendingEmail = repo.getPendingVerificationEmail() ?: "<none>"
+            val (forgotEmail, forgotCode) = repo.getForgotPasswordContext()
+            val user = repo.getUser()
+            prefsDump = "\n--- DataStore (Shared Preferences) ---\n" +
+                "JWT Token: $token\n" +
+                "Remember Me: $rememberMe\n" +
+                "Pending Verification Email: $pendingEmail\n" +
+                "Forgot Password Email: ${forgotEmail ?: "<none>"}\n" +
+                "Forgot Password Code: ${forgotCode ?: "<none>"}"
+            userInfo = if (user != null) {
+                "ID: ${user._id}\n" +
+                "First Name: ${user.prenom}\n" +
+                "Last Name: ${user.nom}\n" +
+                "Email: ${user.email}\n" +
+                "Birth Date: ${user.age}\n" +
+                "Phone: ${user.tel}\n" +
+                "Role: ${user.role}\n" +
+                "Email Verified: ${user.emailVerified}\n" +
+                "Is Verified: ${user.isVerified}"
+            } else null
+        } catch (e: Exception) {
+            prefsDump = "Error reading shared preferences: ${e.message}"
+            userInfo = null
+        }
+    }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Shared Preferences Debug", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(8.dp))
+            Text(prefsDump, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(16.dp))
+            Text("User Info", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(8.dp))
+            if (userInfo != null) {
+                Text(userInfo!!, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Text("No user info available.", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
+@Composable
+fun DataStoreUserDebugSection() {
+    val context = LocalContext.current
+    var userInfo by remember { mutableStateOf("Chargement...") }
+    LaunchedEffect(Unit) {
+        try {
+            val app = context.applicationContext as android.app.Application
+            val repo = tn.esprit.dam.data.AuthRepository(app)
+            val user = repo.getUser()
+            userInfo = if (user != null) {
+                "ID: ${user._id}\n" +
+                "Prénom: ${user.prenom}\n" +
+                "Nom: ${user.nom}\n" +
+                "Email: ${user.email}\n" +
+                "Date de naissance: ${user.age}\n" +
+                "Téléphone: ${user.tel}\n" +
+                "Rôle: ${user.role}\n" +
+                "Email vérifié: ${user.emailVerified}\n" +
+                "Compte vérifié: ${user.isVerified}"
+            } else {
+                "Aucune information utilisateur enregistrée."
+            }
+        } catch (e: Exception) {
+            userInfo = "Erreur lors de la lecture du DataStore: ${e.message}"
+        }
+    }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("User DataStore Debug", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(8.dp))
+            Text(userInfo, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
