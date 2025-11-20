@@ -1,5 +1,6 @@
 package tn.esprit.dam.data
 
+import android.app.Application
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.json.Json
 
@@ -265,5 +266,17 @@ object RetrofitClient {
 
     val authService: AuthService by lazy {
         retrofit.create(AuthService::class.java)
+    }
+}
+
+class AuthInterceptor(private val app: Application) : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val repo = AuthRepository(app)
+        val token = runBlocking { repo.getToken() }
+        val requestBuilder = chain.request().newBuilder()
+        if (!token.isNullOrBlank()) {
+            requestBuilder.addHeader("Authorization", "Bearer $token")
+        }
+        return chain.proceed(requestBuilder.build())
     }
 }

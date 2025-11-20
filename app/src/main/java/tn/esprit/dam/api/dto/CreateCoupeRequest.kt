@@ -11,7 +11,7 @@ import com.google.gson.annotations.SerializedName
 
 data class CreateCoupeRequest(
     @SerializedName("nom") val nom: String,
-    @SerializedName("participants") val participants: List<String> = emptyList(),
+    @SerializedName("matches") val matches: List<String> = emptyList(),
     @SerializedName("date_debut") val dateDebut: String,
     @SerializedName("date_fin") val dateFin: String,
     @SerializedName("tournamentName") val tournamentName: String,
@@ -19,8 +19,11 @@ data class CreateCoupeRequest(
     @SerializedName("date") val date: String,
     @SerializedName("time") val time: String,
     @SerializedName("maxParticipants") val maxParticipants: Int,
+    @SerializedName("referee") val referee: List<String>,
+    @SerializedName("participants") val participants: List<String>? = null,
     @SerializedName("entryFee") val entryFee: Int? = null,
     @SerializedName("prizePool") val prizePool: Int? = null,
-    @SerializedName("referee") val referee: List<String>,
-    @SerializedName("statut") val statut: String = "PROGRAMME"
+    @SerializedName("statut") val statut: String? = null,
+    @SerializedName("categorie") val categorie: String,
+    @SerializedName("type") val type: String
 )

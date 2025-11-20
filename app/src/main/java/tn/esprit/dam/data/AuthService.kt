@@ -65,4 +65,8 @@ interface AuthService {
     // Get User by ID
     @GET("api/v1/users/{id}")
     suspend fun getUserById(@Path("id") id: String): Response<User>
+
+    // Create Coupe (POST)
+    @POST("api/v1/create-coupe")
+    suspend fun createCoupe(@Body request: tn.esprit.dam.api.dto.CreateCoupeRequest): retrofit2.Response<Unit>
 }

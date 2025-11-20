@@ -23,7 +23,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import android.widget.Toast
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
@@ -31,6 +33,8 @@ import tn.esprit.dam.api.dto.CreateCoupeRequest
 import tn.esprit.dam.data.RetrofitClient
 import tn.esprit.dam.ui.theme.DAMTheme
 import java.util.Locale
+import tn.esprit.dam.api.TournamentApiService
+import tn.esprit.dam.data.AuthRepository
 
 /*
 Example values to use in the TournamentCreateForumScreen fields:
@@ -57,11 +61,14 @@ data class TournamentDetails(
     val maxParticipants: String = "",
     val referee: String = "", // This should be an ID in production
     val entryFee: String = "",
-    val prizePool: String = ""
+    val prizePool: String = "",
+    val categorie: String = "Youth",
+    val type: String = "Tournament"
 )
 
 // --- Screen Composable ---
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TournamentCreateForumScreen(
     navController: androidx.navigation.NavHostController,
@@ -116,17 +123,10 @@ fun TournamentCreateForumScreen(
                                     val prizePool = details.prizePool.toIntOrNull()
                                     val refereeList = listOf(details.referee) // Should be a list of IDs
 
-                                    // Fix date parsing to match yyyy-MM-dd and HH:mm input
-                                    val inputFormat = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
-                                    val outputFormat = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.getDefault())
-                                    val dateTimeString = "${details.date} ${details.time}" // e.g. 2025-01-01 14:00
-                                    val dateDebut: String = try {
-                                        val parsedDate = inputFormat.parse(dateTimeString)!!
-                                        outputFormat.format(parsedDate)
-                                    } catch (e: Exception) {
-                                        android.util.Log.e("TournamentCreate", "Date parsing error", e)
-                                        ""
-                                    }
+                                    // --- DATE FORMATTING FOR API ---
+                                    // date_debut and date_fin must be ISO 8601 (e.g. 2025-01-01T08:00:00Z)
+                                    // date must be yyyy-MM-dd (e.g. 2025-01-01)
+                                    val dateDebut = "${details.date}T${details.time}:00Z"
                                     val dateFin = dateDebut
 
                                     if (maxParticipants == null || dateDebut.isEmpty()) {
@@ -134,28 +134,41 @@ fun TournamentCreateForumScreen(
                                         return@launch
                                     }
 
+                                    // --- GET JWT TOKEN FROM DATASTORE (RELIABLE) ---
+                                    val repo = AuthRepository(context.applicationContext as android.app.Application)
+                                    val jwt = withContext(Dispatchers.IO) { repo.getToken() }
+                                    android.util.Log.d("TournamentCreate", "JWT used for Authorization: $jwt")
+
+                                    // --- GET USER FROM DATASTORE FOR DEFAULT NOM ---
+                                    val user = withContext(Dispatchers.IO) {
+                                        AuthRepository(context.applicationContext as android.app.Application).getUser()
+                                    }
+                                    val defaultNom = if (user != null) listOfNotNull(user.prenom, user.nom).joinToString(" ").trim() else details.name
                                     val request = CreateCoupeRequest(
-                                        nom = details.name,
-                                        participants = emptyList(),
+                                        nom = defaultNom,
+                                        matches = emptyList(),
                                         dateDebut = dateDebut,
                                         dateFin = dateFin,
                                         tournamentName = details.name,
                                         stadium = details.stadium,
-                                        date = details.date, // e.g. 12/25/25 or 2025-12-25
-                                        time = details.time, // e.g. 14:30
+                                        date = details.date, // yyyy-MM-dd
+                                        time = details.time, // HH:mm
                                         maxParticipants = maxParticipants,
+                                        referee = refereeList,
+                                        participants = null, // Optional, send null if not needed
                                         entryFee = entryFee,
                                         prizePool = prizePool,
-                                        referee = refereeList,
-                                        statut = "PROGRAMME"
+                                        statut = "PROGRAMME",
+                                        categorie = details.categorie,
+                                        type = details.type
                                     )
 
-                                    // DEBUG: Log the JWT before making the API call
-                                    val jwt = tn.esprit.dam.data.RetrofitClient.getJwtToken(context)
-                                    android.util.Log.d("TournamentCreate", "JWT used for Authorization: $jwt")
-
-                                    val api = RetrofitClient.getTournamentApiService(context)
-                                    val response = api.createCoupe(request)
+                                    val api = tn.esprit.dam.data.RetrofitClient.getRetrofit(context).create(tn.esprit.dam.api.TournamentApiService::class.java)
+                                    val response = api.createCoupeWithAuth(request, "Bearer $jwt")
+                                    android.util.Log.d("TournamentCreate", "RAW REQUEST HEADERS: Authorization: Bearer $jwt")
+                                    if (jwt.isNullOrBlank()) {
+                                        Toast.makeText(context, "JWT token is missing!", Toast.LENGTH_LONG).show()
+                                    }
                                     if (response.isSuccessful) {
                                         Toast.makeText(context, "Tournament created successfully!", Toast.LENGTH_LONG).show()
                                         navController.popBackStack()
@@ -276,7 +289,69 @@ fun TournamentCreateForumScreen(
                             trailingIcon = Icons.Default.KeyboardArrowDown
                         )
 
-                        // 4. Date and Time Row
+                        // 4. Categorie Dropdown
+                        val categorieOptions = listOf("Kids", "Youth", "Junior", "Senior")
+                        var expandedCategorie by remember { mutableStateOf(false) }
+                        ExposedDropdownMenuBox(
+                            expanded = expandedCategorie,
+                            onExpandedChange = { expandedCategorie = !expandedCategorie }
+                        ) {
+                            OutlinedTextField(
+                                value = details.categorie,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Categorie") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCategorie) },
+                                modifier = Modifier.menuAnchor().fillMaxWidth()
+                            )
+                            ExposedDropdownMenu(
+                                expanded = expandedCategorie,
+                                onDismissRequest = { expandedCategorie = false }
+                            ) {
+                                categorieOptions.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(option) },
+                                        onClick = {
+                                            details = details.copy(categorie = option)
+                                            expandedCategorie = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        // 5. Type Dropdown
+                        val typeOptions = listOf("Tournament", "League")
+                        var expandedType by remember { mutableStateOf(false) }
+                        ExposedDropdownMenuBox(
+                            expanded = expandedType,
+                            onExpandedChange = { expandedType = !expandedType }
+                        ) {
+                            OutlinedTextField(
+                                value = details.type,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Type") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedType) },
+                                modifier = Modifier.menuAnchor().fillMaxWidth()
+                            )
+                            ExposedDropdownMenu(
+                                expanded = expandedType,
+                                onDismissRequest = { expandedType = false }
+                            ) {
+                                typeOptions.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(option) },
+                                        onClick = {
+                                            details = details.copy(type = option)
+                                            expandedType = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        // 6. Date and Time Row
                         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             // Date
                             FormTextField(
@@ -299,7 +374,7 @@ fun TournamentCreateForumScreen(
                             )
                         }
 
-                        // 5. Max Participants
+                        // 7. Max Participants
                         FormTextField(
                             label = "Max Participants",
                             placeholder = "e.g., 16",
@@ -309,7 +384,7 @@ fun TournamentCreateForumScreen(
                             keyboardType = KeyboardType.Number
                         )
 
-                        // 6. Entry Fee (Optional)
+                        // 8. Entry Fee (Optional)
                         FormTextField(
                             label = "Entry Fee (Optional)",
                             placeholder = "e.g., \$25",
@@ -319,7 +394,7 @@ fun TournamentCreateForumScreen(
                             keyboardType = KeyboardType.Number
                         )
 
-                        // 7. Prize Pool (Optional)
+                        // 9. Prize Pool (Optional)
                         FormTextField(
                             label = "Prize Pool (Optional)",
                             placeholder = "e.g., \$500",

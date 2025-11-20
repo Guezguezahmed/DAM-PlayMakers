@@ -1,5 +1,6 @@
 package tn.esprit.dam.screens
 
+import android.widget.Toast
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -20,15 +21,18 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -36,13 +40,23 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import androidx.navigation.NavHostController // Import NavHostController
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import tn.esprit.dam.api.TournamentApiService
+import tn.esprit.dam.data.AuthRepository
+import tn.esprit.dam.data.RetrofitClient
 import tn.esprit.dam.ui.theme.DAMTheme
 import tn.esprit.dam.ui.theme.WinrateProgress
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import tn.esprit.dam.components.HomeBottomNavigationBar // <-- New Import
 import tn.esprit.dam.components.Screen
 
-// --- 1. Data Structures (omitted for brevity, assume content remains the same) ---
+// --- 1. Data Structures ---
 data class StatItem(
     val value: String,
     val label: String,
@@ -65,6 +79,7 @@ data class RegisteredTeam(
 )
 
 data class Event(
+    val id: String = "", // Added ID for keying
     val title: String,
     val host: String,
     val type: String,
@@ -77,12 +92,13 @@ data class Event(
     val playersMax: Int,
     val entryFee: Int,
     val prizePool: Int,
-    val status: String,
-    val registeredTeams: List<RegisteredTeam>,
-    val rules: List<String>
+    val registeredTeams: List<String>, // Changed to List<String> to match your API usage
+    val rules: List<String>,
+    // NEW FIELD: To support "My Events" filtering
+    val isOrganizer: Boolean = false
 )
 
-// --- 2. Static Data (omitted for brevity, assume content remains the same) ---
+// --- 2. Static Data (remove all static eventData and sample events) ---
 
 val CardBlue = Color(0xFF64B5F6)
 val CardOrange = Color(0xFFFFB74D)
@@ -95,109 +111,6 @@ private val statData = listOf(
     StatItem("75%", "Win Rate", Icons.Rounded.FlashOn, Color(0xFFFF9800), Color(0xFFFFF8E1))
 )
 
-private val sampleTeams = listOf(
-    RegisteredTeam(1, "Thunder FC", 4.8f, 24),
-    RegisteredTeam(2, "Lightning Squad", 4.6f, 19),
-    RegisteredTeam(3, "Storm United", 4.5f, 18),
-    RegisteredTeam(4, "Blaze FC", 4.3f, 15),
-    RegisteredTeam(5, "Phoenix Rising", 4.2f, 14),
-    RegisteredTeam(6, "Eagles United", 4.0f, 12)
-)
-
-private val sampleRules = listOf(
-    "Teams must arrive 15 minutes before match time",
-    "Minimum 5 players per team required",
-    "Match duration: 2 x 20 minutes halves",
-    "Fair play and sportsmanship expected"
-)
-
-private val eventData = listOf(
-    Event(
-        title = "Champions Cup 2024",
-        host = "Hosted by PlayPeak Official",
-        type = "Knockout",
-        typeIcon = Icons.Filled.EmojiEvents,
-        headerColor = CardPurple,
-        location = "Arena Sports Complex",
-        date = "Nov 15",
-        time = "18:00",
-        playersJoined = 14,
-        playersMax = 16,
-        entryFee = 25,
-        prizePool = 500,
-        status = "Open",
-        registeredTeams = sampleTeams.take(14),
-        rules = sampleRules
-    ),
-    Event(
-        title = "Sunday League",
-        host = "Hosted by Local League Org",
-        type = "League",
-        typeIcon = Icons.Filled.Adjust,
-        headerColor = CardBlue,
-        location = "Green Field Stadium",
-        date = "Nov 10",
-        time = "14:00",
-        playersJoined = 8,
-        playersMax = 10,
-        entryFee = 10,
-        prizePool = 300,
-        status = "Open",
-        registeredTeams = sampleTeams.take(8),
-        rules = sampleRules
-    ),
-    Event(
-        title = "Quick Match",
-        host = "Hosted by Riverside",
-        type = "Quick Match",
-        typeIcon = Icons.Filled.FlashOn,
-        headerColor = CardOrange,
-        location = "Riverside Arena",
-        date = "Nov 8",
-        time = "20:00",
-        playersJoined = 10,
-        playersMax = 10,
-        entryFee = 5,
-        prizePool = 50,
-        status = "Full",
-        registeredTeams = sampleTeams.take(10),
-        rules = sampleRules.take(2).toList()
-    ),
-    Event(
-        title = "Elite Knockout",
-        host = "Hosted by Victory Arena",
-        type = "Knockout",
-        typeIcon = Icons.Filled.EmojiEvents,
-        headerColor = CardPurple,
-        location = "Victory Stadium",
-        date = "Nov 12",
-        time = "16:00",
-        playersJoined = 6,
-        playersMax = 8,
-        entryFee = 30,
-        prizePool = 800,
-        status = "Open",
-        registeredTeams = sampleTeams.take(6),
-        rules = sampleRules
-    ),
-    Event(
-        title = "Weekend Warriors",
-        host = "Hosted by City Park Rec",
-        type = "League",
-        typeIcon = Icons.Filled.Adjust,
-        headerColor = CardBlue,
-        location = "City Park",
-        date = "Nov 19",
-        time = "10:00",
-        playersJoined = 1,
-        playersMax = 10,
-        entryFee = 15,
-        prizePool = 200,
-        status = "Open",
-        registeredTeams = sampleTeams.take(1),
-        rules = sampleRules
-    )
-)
 
 // --- 3. Main Screen Composables (omitted for brevity, assume content remains the same) ---
 @Composable
@@ -277,9 +190,9 @@ fun SearchBar(query: String, onQueryChange: (String) -> Unit, modifier: Modifier
             unfocusedContainerColor = MaterialTheme.colorScheme.surface,
             focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
             unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
-        )
-    )
+        ))
 }
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -320,7 +233,6 @@ fun EventCard(event: Event, onClick: () -> Unit) {
     val outlineColor = MaterialTheme.colorScheme.outline
     val textColor = if (isSystemInDarkTheme()) MaterialTheme.colorScheme.onSurface else Color.Black
     val cardElevation = if (isSystemInDarkTheme()) 1.dp else 4.dp
-
     val playerRatio = event.playersJoined.toFloat() / event.playersMax.toFloat()
 
     AnimatedCard(
@@ -329,7 +241,7 @@ fun EventCard(event: Event, onClick: () -> Unit) {
             .fillMaxWidth()
             .padding(vertical = 8.dp),
         shape = RoundedCornerShape(16.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = MaterialTheme.colorScheme.surface, // Card body always uses surface color
         defaultElevation = cardElevation,
         pressedElevation = if (isSystemInDarkTheme()) 4.dp else 8.dp
     ) {
@@ -347,7 +259,7 @@ fun EventCard(event: Event, onClick: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // Title and Type
+                    // Title and Host
                     Column {
                         Text(
                             text = event.title,
@@ -364,35 +276,21 @@ fun EventCard(event: Event, onClick: () -> Unit) {
                             )
                             Spacer(Modifier.width(4.dp))
                             Text(
-                                text = event.type,
+                                text = event.host, // Show organizer name under the title
                                 fontSize = 14.sp,
                                 color = Color.White.copy(alpha = 0.8f)
                             )
                         }
                     }
-                    // Status Button
-                    if (event.status == "Open") {
-                        Button(
-                            onClick = { /* Join action */ },
-                            modifier = Modifier.height(30.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.2f)),
-                            elevation = ButtonDefaults.buttonElevation(0.dp)
-                        ) { Text("Open", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
-                    } else if (event.status == "Full") {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color.White.copy(alpha = 0.2f))
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        ) { Text("Full", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
-                    }
                 }
             }
-
-            // --- Card Body (Details) ---
-            Column(modifier = Modifier.padding(16.dp)) {
+            // --- Card Body (Surface Color) ---
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(16.dp)
+            ) {
                 DetailRow(
                     icon = Icons.Filled.LocationOn,
                     text = event.location,
@@ -510,22 +408,84 @@ fun EventsScreen(navController: NavHostController) { // <-- Changed type to NavH
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun EventsScreenContent(navController: NavHostController, onEventClick: (Event) -> Unit) { // <-- Changed type to NavHostController
+fun EventsScreenContent(navController: NavHostController, onEventClick: (Event) -> Unit) {
     val scrollState = rememberScrollState()
     val onSurfaceColor = MaterialTheme.colorScheme.onSurface
     var selectedType by remember { mutableStateOf("All Events") }
     var searchQuery by remember { mutableStateOf("") }
+    var events by remember { mutableStateOf<List<Event>>(emptyList()) }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var isLoading by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    val uniqueEventTypes = listOf("All Events") + eventData.map { it.type }.distinct()
+    // Fetch events from API on first composition
+    LaunchedEffect(Unit) {
+        coroutineScope.launch {
+            isLoading = true
+            errorMessage = null
+            try {
+                val repo = AuthRepository(context.applicationContext as android.app.Application)
+                val jwt = withContext(Dispatchers.IO) { repo.getToken() }
+                // Get current user ID to verify ownership
+                val currentUser = withContext(Dispatchers.IO) { repo.getUser() }
+                val currentUserId = currentUser?._id
 
-    // Step 1: Filter by Tab
-    val tabFilteredEvents = if (selectedType == "All Events") {
-        eventData
-    } else {
-        eventData.filter { it.type == selectedType }
+                val api = RetrofitClient.getRetrofit(context).create(TournamentApiService::class.java)
+                val response = api.getCoupesWithAuth("Bearer $jwt")
+
+                if (response.isSuccessful) {
+                    val coupes = response.body() ?: emptyList()
+                    events = coupes.map { coupe ->
+                        val participantsCount = coupe.participants.size
+                        val cardColor = when (coupe.type) {
+                            "Tournament" -> CardPurple
+                            "League" -> CardOrange
+                            else -> CardPurple
+                        }
+                        val isOrganizer = coupe.id_organisateur?._id == currentUserId
+                        Event(
+                            id = coupe._id, // Map the ID
+                            title = coupe.tournamentName,
+                            host = coupe.nom,
+                            type = coupe.type,
+                            typeIcon = Icons.Filled.EmojiEvents,
+                            headerColor = cardColor,
+                            location = coupe.stadium,
+                            date = coupe.date.take(10),
+                            time = coupe.time,
+                            playersJoined = participantsCount,
+                            playersMax = coupe.maxParticipants,
+                            entryFee = coupe.entryFee ?: 0,
+                            prizePool = coupe.prizePool ?: 0,
+                            registeredTeams = emptyList(), // Or map participant IDs if available immediately
+                            rules = emptyList(), // Add rules if your API supports it
+                            isOrganizer = isOrganizer // Set the organizer flag
+                        )
+                    }
+                } else {
+                    errorMessage = "Failed to load events: ${response.code()} ${response.message()}"
+                }
+            } catch (e: Exception) {
+                errorMessage = "Error: ${e.message}"
+            } finally {
+                isLoading = false
+            }
+        }
     }
 
-    // Step 2: Filter by Search Query
+    // --- FILTERING LOGIC START ---
+    // 1. Define the fixed categories + "My Events"
+    val categories = listOf("All Events", "My Events", "Tournament", "League")
+
+    // 2. Update Filter Logic
+    val tabFilteredEvents = when (selectedType) {
+        "All Events" -> events
+        "My Events" -> events.filter { it.isOrganizer }
+        else -> events.filter { it.type == selectedType }
+    }
+
+    // 3. Apply Search Filter
     val filteredEvents = if (searchQuery.isBlank()) {
         tabFilteredEvents
     } else {
@@ -537,17 +497,20 @@ fun EventsScreenContent(navController: NavHostController, onEventClick: (Event) 
         }
     }
 
-    // Recalculate tab counts based on ALL events (not filtered events)
-    val calculatedTabData = uniqueEventTypes.map { type ->
-        val count = if (type == "All Events") eventData.size else eventData.count { it.type == type }
-        TabItem(label = type, count = count, isSelected = type == selectedType)
+    // 4. Recalculate Counts for Tabs
+    val calculatedTabData = categories.map { category ->
+        val count = when (category) {
+            "All Events" -> events.size
+            "My Events" -> events.count { it.isOrganizer }
+            else -> events.count { it.type == category }
+        }
+        TabItem(label = category, count = count, isSelected = category == selectedType)
     }
+    // --- FILTERING LOGIC END ---
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
-        // <-- Integrate the Bottom Navigation Bar here -->
-        // This composable is only called when selectedEvent is null (i.e., we are on the list screen).
         bottomBar = {
             HomeBottomNavigationBar(navController = navController)
         }
@@ -555,7 +518,7 @@ fun EventsScreenContent(navController: NavHostController, onEventClick: (Event) 
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                // Apply content padding provided by the Scaffold, accounting for the bottom bar
+                // Apply content padding provided by the Scaffold
                 .padding(paddingValues)
                 .verticalScroll(scrollState)
                 .padding(horizontal = 16.dp),
@@ -585,10 +548,12 @@ fun EventsScreenContent(navController: NavHostController, onEventClick: (Event) 
                 query = searchQuery,
                 onQueryChange = {
                     searchQuery = it
-                    selectedType = "All Events"
+                    // Don't reset the selected tab when searching, just filter within it
                 }
             )
             Spacer(Modifier.height(16.dp))
+
+            // Category Tabs
             LazyRow(
                 modifier = Modifier.fillMaxWidth().height(40.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -600,27 +565,41 @@ fun EventsScreenContent(navController: NavHostController, onEventClick: (Event) 
                     }
                 }
             }
+
             Spacer(Modifier.height(24.dp))
             Text(
-                text = "Available Tournaments (${filteredEvents.size})",
+                text = "$selectedType (${filteredEvents.size})",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = onSurfaceColor
             )
             Spacer(Modifier.height(16.dp))
-            Column(modifier = Modifier.fillMaxWidth()) {
-                if (filteredEvents.isEmpty()) {
-                    Text(
-                        text = "No events found.",
-                        fontSize = 16.sp,
-                        color = MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.padding(20.dp)
-                    )
-                } else {
-                    filteredEvents.forEachIndexed { index, event ->
-                        EventCard(event, onClick = { onEventClick(event) })
-                        if (index < filteredEvents.lastIndex) {
-                            Spacer(Modifier.height(8.dp))
+
+            if (isLoading) {
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else if (errorMessage != null) {
+                Text(
+                    text = errorMessage ?: "Unknown error",
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(20.dp)
+                )
+            } else {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (filteredEvents.isEmpty()) {
+                        Text(
+                            text = "No events found.",
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.padding(20.dp)
+                        )
+                    } else {
+                        filteredEvents.forEachIndexed { index, event ->
+                            EventCard(event, onClick = { onEventClick(event) })
+                            if (index < filteredEvents.lastIndex) {
+                                Spacer(Modifier.height(8.dp))
+                            }
                         }
                     }
                 }
@@ -637,6 +616,71 @@ fun EventDetailScreen(event: Event, onBackClick: () -> Unit) {
     val scrollState = rememberScrollState()
     val surfaceColor = MaterialTheme.colorScheme.surface
     val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var participantNames by remember { mutableStateOf<List<String>>(emptyList()) }
+    var isLoadingParticipants by remember { mutableStateOf(false) }
+    // Fetch current user ID from DataStore
+    var currentUserId by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        val repo = AuthRepository(context.applicationContext as android.app.Application)
+        val user = withContext(Dispatchers.IO) { repo.getUser() }
+        currentUserId = user?._id
+    }
+
+    // Fetch participant names by ID (use event.host as fallback if no registeredTeams)
+    var coupeId by remember { mutableStateOf<String?>(null) }
+    var coupeOwnerId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(event) {
+        coroutineScope.launch {
+            isLoadingParticipants = true
+            try {
+                val repo = AuthRepository(context.applicationContext as android.app.Application)
+                val jwt = withContext(Dispatchers.IO) { repo.getToken() }
+                val api = RetrofitClient.getRetrofit(context).create(TournamentApiService::class.java)
+                val coupesResponse = api.getCoupesWithAuth("Bearer $jwt")
+                val coupe = coupesResponse.body()?.find {
+                    it.tournamentName == event.title && it.nom == event.host
+                }
+                coupeId = coupe?._id
+                coupeOwnerId = coupe?.id_organisateur?._id
+                val participantIds = coupe?.participants?.mapNotNull {
+                    when (it) {
+                        is String -> it
+                        is Map<*, *> -> it["\$oid"] as? String // Use string literal for key
+                        else -> null
+                    }
+                } ?: emptyList()
+                val names = participantIds.mapNotNull { id ->
+                    val response = api.getUserByIdWithAuth(id, "Bearer $jwt")
+                    if (response.isSuccessful) {
+                        val user = response.body()
+                        if (user != null) listOfNotNull(user.prenom, user.nom).joinToString(" ") else null
+                    } else null
+                }
+                participantNames = names
+            } catch (_: Exception) {
+                participantNames = emptyList()
+            } finally {
+                isLoadingParticipants = false
+            }
+        }
+    }
+
+    // Format the date string dynamically
+    val formattedDate = remember(event.date) {
+        try {
+            val isoFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+            val displayFormat = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.getDefault())
+            isoFormat.timeZone = TimeZone.getTimeZone("UTC")
+            displayFormat.timeZone = TimeZone.getDefault()
+            val date = isoFormat.parse(event.date)
+            if (date != null) displayFormat.format(date) else event.date
+        } catch (e: Exception) {
+            event.date
+        }
+    }
 
     // NOTE: Scaffold here does NOT include a bottomBar
     Scaffold(
@@ -727,7 +771,7 @@ fun EventDetailScreen(event: Event, onBackClick: () -> Unit) {
                 Spacer(Modifier.height(24.dp))
 
                 // Detail Info Rows
-                DetailInfoRow(icon = Icons.Filled.CalendarToday, title = "Date", value = "Friday, November 15, 2024")
+                DetailInfoRow(icon = Icons.Filled.CalendarToday, title = "Date", value = formattedDate)
                 DetailInfoRow(icon = Icons.Filled.Schedule, title = "Time", value = event.time)
                 DetailInfoRow(icon = Icons.Filled.People, title = "Participants", value = "${event.playersJoined}/${event.playersMax} Teams")
                 DetailInfoRow(icon = Icons.Filled.AttachMoney, title = "Entry Fee", value = "$${event.entryFee}")
@@ -737,16 +781,19 @@ fun EventDetailScreen(event: Event, onBackClick: () -> Unit) {
 
                 // Registered Teams
                 Text(
-                    text = "Registered Teams (${event.registeredTeams.size})",
+                    text = "Registered Teams (${event.playersJoined})",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = onSurfaceColor
                 )
                 Spacer(Modifier.height(16.dp))
-
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    event.registeredTeams.forEach { team ->
-                        TeamRow(team = team)
+                if (isLoadingParticipants) {
+                    CircularProgressIndicator()
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        participantNames.forEachIndexed { idx, name ->
+                            TeamRowSimple(name = name, index = idx)
+                        }
                     }
                 }
 
@@ -754,11 +801,83 @@ fun EventDetailScreen(event: Event, onBackClick: () -> Unit) {
 
                 // Tournament Rules
                 RulesCard(rules = event.rules)
-
+                Spacer(Modifier.height(16.dp))
+                // --- Join/Edit Button ---
+                var hasJoined by remember { mutableStateOf(false) }
+                // Check if the user is already a participant (on first load)
+                LaunchedEffect(currentUserId, coupeId, participantNames) {
+                    if (currentUserId != null && coupeId != null) {
+                        val repo = AuthRepository(context.applicationContext as android.app.Application)
+                        val jwt = withContext(Dispatchers.IO) { repo.getToken() }
+                        val api = RetrofitClient.getRetrofit(context).create(TournamentApiService::class.java)
+                        val coupesResponse = api.getCoupesWithAuth("Bearer $jwt")
+                        val coupe = coupesResponse.body()?.find { it._id == coupeId }
+                        val participantIds = coupe?.participants?.mapNotNull {
+                            when (it) {
+                                is String -> it
+                                is Map<*, *> -> it["\$oid"] as? String // FIX: Use string literal for key
+                                else -> null
+                            }
+                        } ?: emptyList()
+                        hasJoined = participantIds.contains(currentUserId)
+                    }
+                }
+                if (currentUserId != null && coupeId != null) {
+                    val isOwner = currentUserId == coupeOwnerId
+                    val buttonColor = when {
+                        isOwner -> MaterialTheme.colorScheme.error // Red for Edit
+                        hasJoined -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f) // Lighter green for Joined
+                        else -> MaterialTheme.colorScheme.primary // Green for Join
+                    }
+                    val buttonText = when {
+                        isOwner -> "Edit"
+                        hasJoined -> "Joined"
+                        else -> "Join"
+                    }
+                    val buttonEnabled = !isOwner && !hasJoined
+                    Button(
+                        onClick = {
+                            if (!isOwner && !hasJoined) {
+                                coroutineScope.launch {
+                                    val repo = AuthRepository(context.applicationContext as android.app.Application)
+                                    val jwt = withContext(Dispatchers.IO) { repo.getToken() }
+                                    val api = RetrofitClient.getRetrofit(context).create(TournamentApiService::class.java)
+                                    val response = api.addParticipantWithAuth(
+                                        coupeId!!,
+                                        tn.esprit.dam.api.AddParticipantRequest(userId = currentUserId!!),
+                                        "Bearer $jwt"
+                                    )
+                                    if (response.isSuccessful) {
+                                        Toast.makeText(context, "You have joined the tournament!", Toast.LENGTH_LONG).show()
+                                        hasJoined = true
+                                    } else if (response.code() == 409) {
+                                        Toast.makeText(context, "You are already a participant.", Toast.LENGTH_LONG).show()
+                                        hasJoined = true
+                                    } else {
+                                        Toast.makeText(context, "Failed to join tournament: ${response.code()} ${response.message()}", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                        },
+                        enabled = buttonEnabled,
+                        colors = ButtonDefaults.buttonColors(containerColor = buttonColor),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Text(buttonText, fontWeight = FontWeight.Bold)
+                    }
+                }
+                // Spacer for bottom padding
                 Spacer(Modifier.height(30.dp))
             }
         }
     }
+}
+
+// Helper to get the coupe ID for the event (by matching title and host)
+fun coupeIdForEvent(event: Event): String? {
+    // This should be improved to use a more reliable mapping if available
+    // For now, use a static mapping or pass the ID in the Event if possible
+    return null // TODO: Implement actual mapping
 }
 
 // --- 7. Detail Screen Helpers (omitted for brevity, assume content remains the same) ---
@@ -865,6 +984,43 @@ fun TeamRow(team: RegisteredTeam) {
 }
 
 @Composable
+fun TeamRowSimple(name: String, index: Int) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.primary),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "${index + 1}",
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = name,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
+@Composable
 fun RulesCard(rules: List<String>) {
     val cardBg = if (isSystemInDarkTheme()) CardBlue.copy(alpha = 0.1f) else Color(0xFFE3F2FD)
     val iconBg = if (isSystemInDarkTheme()) CardBlue.copy(alpha = 0.3f) else Color.White
@@ -942,7 +1098,22 @@ fun EventsScreenPreviewDark() {
 @Composable
 fun EventDetailPreviewLight() {
     DAMTheme(darkTheme = false) {
-        EventDetailScreen(event = eventData[0], onBackClick = {})
+        EventDetailScreen(event = Event(
+            title = "Preview Event",
+            host = "Preview Host",
+            type = "PROGRAMME",
+            typeIcon = Icons.Filled.EmojiEvents,
+            headerColor = CardPurple,
+            location = "Preview Stadium",
+            date = "2025-01-01",
+            time = "14:00",
+            playersJoined = 0,
+            playersMax = 32,
+            entryFee = 0,
+            prizePool = 0,
+            registeredTeams = emptyList(),
+            rules = emptyList()
+        ), onBackClick = {})
     }
 }
 
@@ -950,6 +1121,21 @@ fun EventDetailPreviewLight() {
 @Composable
 fun EventDetailPreviewDark() {
     DAMTheme(darkTheme = true) {
-        EventDetailScreen(event = eventData[0], onBackClick = {})
+        EventDetailScreen(event = Event(
+            title = "Preview Event",
+            host = "Preview Host",
+            type = "PROGRAMME",
+            typeIcon = Icons.Filled.EmojiEvents,
+            headerColor = CardPurple,
+            location = "Preview Stadium",
+            date = "2025-01-01",
+            time = "14:00",
+            playersJoined = 0,
+            playersMax = 32,
+            entryFee = 0,
+            prizePool = 0,
+            registeredTeams = emptyList(),
+            rules = emptyList()
+        ), onBackClick = {})
     }
 }

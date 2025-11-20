@@ -70,6 +70,7 @@ val mockTournamentTypes = listOf(
     )
 )
 
+
 // --- 2. Composable Components ---
 
 @Composable
@@ -225,6 +226,7 @@ fun TournamentTypeCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateTournamentScreen(
     navController: NavHostController = rememberNavController()
@@ -244,6 +246,9 @@ fun CreateTournamentScreen(
         targetValue = if (isSelectionMade) Color.White else DisabledText,
         animationSpec = tween(durationMillis = 200)
     )
+
+    // Tournament details state
+    var details by remember { mutableStateOf(TournamentDetails()) }
 
     // Use Scaffold to structure the screen and reserve space for the bottom bar
     Scaffold(
@@ -293,6 +298,7 @@ fun CreateTournamentScreen(
                         onSelect = { selectedType = it.id }
                     )
                 }
+                Spacer(Modifier.height(16.dp))
             }
 
             // 4. Continue Button (fixed at the bottom above the NavigationBar area)
